@@ -33,12 +33,20 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
   }, [status])
 
   // Mantener la pantalla encendida mientras graba (si el navegador lo permite).
+  // Al volver a la app se pide de nuevo: el navegador puede soltarlo al
+  // cambiar de pestaña. Fallback silencioso si no hay Wake Lock.
   useEffect(() => {
     if (status !== 'recording') return
     let lock: { release: () => void } | null = null
+    let cancelled = false
     const nav = navigator as Navigator & { wakeLock?: { request: (t: string) => Promise<{ release: () => void }> } }
-    nav.wakeLock?.request('screen').then((l) => { lock = l }).catch(() => undefined)
-    return () => { lock?.release() }
+    const ask = () => {
+      nav.wakeLock?.request('screen').then((l) => { if (!cancelled) lock = l }).catch(() => undefined)
+    }
+    ask()
+    const onVisible = () => { if (document.visibilityState === 'visible') ask() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); lock?.release() }
   }, [status])
 
   useEffect(() => () => {
@@ -140,6 +148,7 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
           </div>
           <RouteMap pts={points} />
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : '● Grabando… no cierres la app'}</p>
+          <p className="text-center text-xs text-slate-500">La pantalla se mantiene encendida mientras grabas, para que el GPS y la música no se pausen.</p>
           {error && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">{error}</p>}
           <div className="flex gap-2">
             {status === 'recording'
