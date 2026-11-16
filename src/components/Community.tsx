@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Business, Post, Profile } from '../lib/types'
 import { createPost } from '../lib/store'
-import { Btn, Card, Empty } from './ui'
+import { Btn, Card, Empty, inputCls } from './ui'
 
 export default function Community({ profile, posts, businesses, onRefresh }: { profile: Profile; posts: Post[]; businesses: Business[]; onRefresh: () => void }) {
   const [text, setText] = useState('')
@@ -22,7 +22,7 @@ export default function Community({ profile, posts, businesses, onRefresh }: { p
       <h2 className="text-2xl font-black text-teal-dark">Comunidad</h2>
       <Card>
         <form onSubmit={publish} className="space-y-2">
-          <textarea className="w-full rounded-xl border border-slate-300 px-3 py-2" rows={3} value={text}
+          <textarea className={`${inputCls} resize-none`} rows={3} value={text}
             onChange={(e) => setText(e.target.value)} placeholder={`¿Qué onda, ${profile.name}? ¿Buscas compañero, compartes un logro…?`} />
           {err && <p className="text-sm text-red-600">{err}</p>}
           <Btn type="submit" variant="teal" className="w-full">Publicar</Btn>

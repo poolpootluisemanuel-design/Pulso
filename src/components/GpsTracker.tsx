@@ -222,8 +222,8 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
       {(status === 'recording' || status === 'paused') && (
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
           </div>
           <RouteMap pts={points} />

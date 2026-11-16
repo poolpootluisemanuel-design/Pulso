@@ -26,12 +26,12 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
   return (
     <div className="space-y-4">
       {/* Saludo con avatar, como la app de Muse */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-wider text-pulso">Cancún · {profile.zone}</p>
-          <h2 className="text-2xl font-black text-night">Hola, {profile.name} 👋</h2>
+          <h2 className="truncate text-2xl font-black text-night">Hola, {profile.name} 👋</h2>
         </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-xl font-black text-white shadow-lg shadow-pulso/30">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-xl font-black text-white shadow-lg shadow-pulso/30">
           {profile.name.slice(0, 1).toUpperCase()}
         </div>
       </div>
@@ -89,10 +89,10 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         <div className="flex justify-between">
           {week.map((d, i) => (
             <div key={d} className="text-center">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-black shadow-sm ${trainedDays.has(i) ? 'bg-gradient-to-br from-pulso to-pulso-dark text-white' : i === todayIdx ? 'bg-night text-white ring-2 ring-pulso' : 'bg-night-100 text-slate-600'}`}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-black shadow-sm ${trainedDays.has(i) ? 'bg-gradient-to-br from-pulso to-pulso-dark text-white' : i === todayIdx ? 'bg-night text-white ring-2 ring-pulso' : 'bg-night-100 text-slate-600'}`}>
                 {d.slice(0, 2).toUpperCase()}
               </div>
-              <p className="mt-1 text-[10px] font-semibold text-slate-500">{d.slice(0, 3)}</p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">{d.slice(0, 3)}</p>
             </div>
           ))}
         </div>

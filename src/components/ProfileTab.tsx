@@ -88,8 +88,8 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { us
             </div>
             {sports.map((s) => (
               <div key={s.sport} className="mt-2 flex items-center gap-2">
-                <span className="w-24 text-sm font-semibold">{s.sport}</span>
-                <select className={selectCls} value={s.level} onChange={(e) => setLevel(s.sport, e.target.value)}>
+                <span className="w-28 shrink-0 truncate text-sm font-semibold">{s.sport}</span>
+                <select className={`${selectCls} min-w-0 flex-1`} value={s.level} onChange={(e) => setLevel(s.sport, e.target.value)}>
                   {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
               </div>

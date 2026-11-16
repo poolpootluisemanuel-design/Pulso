@@ -13,9 +13,10 @@
 //   para canciones que el usuario YA tenga descargadas en su teléfono.
 // - Este componente vive MONTADO EN App.tsx, fuera de las pestañas:
 //   nunca se oculta con display:none (eso pausa el iframe de YouTube).
-//   En Entrenar se ve la tarjeta completa; en las demás pestañas se ve
-//   la mini-barra fija con el video chiquito pero visible, y el audio
-//   sigue sonando.
+//   Por defecto es una MINI-BARRA fija y pequeña en todas las pestañas
+//   (también en Entrenar); solo se expande a una hoja baja (40vh) con
+//   el video en miniatura cuando Luis la abre, y se recoge sola al
+//   cambiar de pestaña. El audio sigue sonando al recogerla.
 // - Segundo plano: con pantalla encendida (Wake Lock) la música sigue;
 //   con pantalla apagada hace falta YouTube Premium ("Abrir en YouTube").
 //   La música local (<audio> + Media Session) aguanta mejor.
@@ -107,9 +108,13 @@ type YTPlayer = {
   destroy: () => void
 }
 
-export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoTrain }: {
+export default function MusicPlayer({ profileId, compact, expanded, onExpandedChange, onPlayingChange, onGoTrain }: {
   profileId: string
   compact?: boolean
+  // Controlado desde App: la música empieza recogida en mini-barra en
+  // todas las pestañas; solo se expande cuando Luis la abre en Entrenar.
+  expanded?: boolean
+  onExpandedChange?: (v: boolean) => void
   onPlayingChange?: (m: MusicStatus) => void
   onGoTrain?: () => void
 }) {
@@ -117,9 +122,16 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   const [playing, setPlaying] = useState(false)
   const [customInput, setCustomInput] = useState(() => getMusicPref(profileId).customUrl)
   const [customErr, setCustomErr] = useState('')
-  const [open, setOpen] = useState(true)
   const [keepScreenOn, setKeepScreenOn] = useState(true)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+
+  // Al cambiar de pestaña (compact) la hoja se recoge sola a
+  // mini-barra: la música sigue sonando, pero no tapa el contenido
+  // de la pestaña nueva. En Entrenar solo se expande si Luis la abre.
+  useEffect(() => {
+    if (compact && expanded) onExpandedChange?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact])
 
   // Reproductor local opcional.
   const [source, setSource] = useState<'youtube' | 'local'>('youtube')
@@ -427,18 +439,15 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   }
 
   // Div del reproductor de YouTube: UN SOLO nodo, siempre el mismo,
-  // siempre montado como primer hijo de la raíz. Antes se renderizaba
-  // DOS veces en la tarjeta completa (una como primer hijo y otra dentro
-  // de la sección de YouTube): el ref quedaba en la segunda instancia,
-  // así que al pasar a mini-barra esa instancia se desmontaba, el
-  // YT.Player quedaba huérfano y el video "se movía" y dejaba de
-  // responder. Ahora hay una sola instancia y nunca cambia de padre.
-  // En la tarjeta completa el video queda fijo arriba (sticky) aunque
-  // se baje por la lista de controles.
+  // siempre montado como primer hijo de la raíz. En mini-barra y en la
+  // hoja expandida el video es solo una MINIATURA (h-12/h-24): antes
+  // en la hoja ocupaba todo el ancho en 16:9 y tapaba la sección.
+  // Con música local se oculta en la hoja (el audio es lo que suena);
+  // en mini-barra el nodo sigue montado para que no se recargue.
   const ytPlayer = ytFailed ? (
     <iframe
       key={useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}
-      className={compact ? 'h-16 w-28 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'sticky top-0 z-10 aspect-video w-full bg-slate-900'}
+      className={!expanded ? 'h-12 w-20 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'h-24 w-40 shrink-0 rounded-lg bg-slate-900'}
       src={embedSrc(preset, custom)}
       title={useCustom ? pref.customLabel : `YouTube: ${preset.label}`}
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -447,27 +456,26 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   ) : (
     <div
       ref={playerDivRef}
-      className={compact
-        ? 'h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-slate-900'
+      className={!expanded
+        ? 'h-12 w-20 shrink-0 overflow-hidden rounded-lg bg-slate-900'
         : source === 'local' ? 'hidden'
-        : 'sticky top-0 z-10 aspect-video w-full overflow-hidden rounded-xl bg-slate-900'}
+        : 'h-24 w-40 shrink-0 overflow-hidden rounded-lg bg-slate-900'}
     />
   )
 
   // Una sola raíz y el div de YouTube siempre como primer hijo: al
-  // pasar de tarjeta completa a mini-barra (y al revés) React conserva
-  // el mismo nodo DOM y el reproductor NO se recarga ni se corta.
-  // (Dos árboles distintos con early-return lo desmontarían.)
-  // En modo completo la raíz es una hoja con scroll (max-h) anclada
-  // abajo, no un bloque en el flujo: así el reproductor no cambia de
-  // sitio al cambiar de pestaña, solo se expande o se recoge en el
-  // mismo lugar fijo.
+  // pasar de mini-barra a hoja (y al revés) React conserva el mismo
+  // nodo DOM y el reproductor NO se recarga ni se corta.
+  // La hoja expandida es BAJA: max-h-[40vh] con scroll interno, y el
+  // video es solo una miniatura. Antes era 62vh con video 16:9 a todo
+  // lo ancho y tapaba la sección completa. Por defecto todo es
+  // mini-barra (también en Entrenar); la hoja solo se abre al tocar ▲.
   return (
-    <div className={compact
+    <div className={!expanded
       ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
-      : 'max-h-[62vh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white p-4 shadow-xl shadow-night/20'}>
+      : 'max-h-[40vh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white p-3 shadow-xl shadow-night/20'}>
       {ytPlayer}
-      {compact ? (
+      {!expanded ? (
         <>
           <button
             onClick={togglePlay}
@@ -488,23 +496,32 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
               ⏭
             </button>
           )}
+          <button
+            onClick={() => { if (!compact) onExpandedChange?.(true); else onGoTrain?.() }}
+            className="shrink-0 rounded-full bg-white/10 px-2.5 py-2 text-xs font-bold"
+            aria-label="Expandir reproductor"
+          >
+            ▲
+          </button>
           <button onClick={onGoTrain} className="shrink-0 rounded-full bg-teal px-3 py-2 text-xs font-bold text-white">
             Entrenar →
           </button>
         </>
       ) : (
-        <div className="mt-3">
-          <button className="flex w-full items-center justify-between text-left" onClick={() => setOpen(!open)}>
-            <h3 className="text-lg font-bold">🎵 Música para entrenar</h3>
-            <span className="text-slate-400">{open ? '▲' : '▼'}</span>
-          </button>
-          {open && (
-            <div className="mt-3 space-y-3">
+        <div className="mt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base font-bold">🎵 Música para entrenar</h3>
+            <button
+              onClick={() => onExpandedChange?.(false)}
+              className="shrink-0 rounded-full bg-night-100 px-3 py-1.5 text-xs font-bold text-teal-dark"
+              aria-label="Recoger reproductor"
+            >
+              ▼ Recoger
+            </button>
+          </div>
+          <div className="mt-2 space-y-3">
           <p className="text-sm text-slate-600">
-            Suena mientras entrenas y sigue sonando si cambias de pestaña. Para que suene en segundo plano con la pantalla apagada hace falta YouTube Premium: ábrela en YouTube con el botón de abajo.
-          </p>
-          <p className="rounded-xl bg-amber-50 p-2 text-xs text-amber-800">
-            Ojo: de YouTube no se pueden descargar las canciones, YouTube no lo permite. La música local es solo para canciones que tú ya tengas descargadas en tu teléfono: elige tus MP3 abajo y suenan sin subirlos a ningún lado.
+            Sigue sonando al cambiar de pestaña. Con la pantalla apagada hace falta YouTube Premium: ábrela en YouTube con el botón de abajo.
           </p>
 
           <div className="flex gap-2">
@@ -550,9 +567,6 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
                   ▶ Abrir en YouTube
                 </Btn>
               </div>
-              <p className="text-xs text-slate-500">
-                {`Sonando: ${title}.`} Con la pantalla encendida y la app abierta, la música sigue mientras entrenas o grabas con GPS, aunque cambies de pestaña. Si bloqueas la pantalla o cambias de app, YouTube web puede pausar: para segundo plano real, abre en YouTube con Premium (o Spotify Premium después).
-              </p>
 
               <Field label="Tu playlist de YouTube (opcional)">
                 <div className="flex gap-2">
@@ -642,15 +656,14 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
               {keepScreenOn ? 'Sí' : 'No'}
             </button>
           </div>
-        </div>
-      )}
+          </div>
         </div>
       )}
       {/* El <audio> local siempre montado; con controles solo en la
-          tarjeta completa con música local. */}
+          hoja expandida con música local. */}
       <audio
         ref={audioRef}
-        className={!compact && source === 'local' && currentLocal ? 'mt-3 w-full' : 'hidden'}
+        className={expanded && source === 'local' && currentLocal ? 'mt-3 w-full' : 'hidden'}
         controls
         preload="metadata"
         src={currentLocal ? currentLocal.url : undefined}

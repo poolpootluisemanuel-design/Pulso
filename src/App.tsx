@@ -24,11 +24,6 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'perfil', label: 'Perfil', icon: '👤' },
 ]
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: string }>
-}
-
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -40,15 +35,18 @@ export default function App() {
   const [challenges, setChallenges] = useState<Challenge[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [businesses, setBusinesses] = useState<Business[]>([])
-  const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [installDismissed, setInstallDismissed] = useState(false)
+  // La música empieza siempre recogida en mini-barra; solo se expande
+  // cuando Luis la abre desde Entrenar. Al cambiar de pestaña se
+  // recoge sola (ver MusicPlayer: compact la recoge).
+  const [musicExpanded, setMusicExpanded] = useState(false)
   // Actividad en curso de Entrenar (GPS / música): para la barrita que
   // aparece al cambiar de pestaña y vuelve a Entrenar al tocarla.
   const [activity, setActivity] = useState<TrainActivity>({ gps: null, music: null })
 
-  const isStandalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+  // La app ya se instala desde Chrome (íconos PWA subidos): Luis pidió
+  // quitar la leyenda de cómo instalar y el banner propio, así que no
+  // hay ningún texto de instalación. Chrome muestra su propio prompt
+  // cuando toca, sin leyenda nuestra.
 
   const loadAll = useCallback(async () => {
     const me = await getCurrentUser()
@@ -65,15 +63,6 @@ export default function App() {
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      e.preventDefault()
-      setInstallEvt(e as BeforeInstallPromptEvent)
-    }
-    window.addEventListener('beforeinstallprompt', handler)
-    return () => window.removeEventListener('beforeinstallprompt', handler)
-  }, [])
 
   if (loading) {
     return (
@@ -123,31 +112,7 @@ export default function App() {
         </div>
       </header>
 
-      {!isStandalone && installEvt && !installDismissed && (
-        <div className="mx-auto mt-3 max-w-2xl px-4">
-          <div className="flex items-center justify-between gap-2 rounded-3xl bg-white p-3 shadow-md">
-            <p className="text-sm"><strong>Instala PULSO</strong> en tu pantalla para abrirla como app, sin WhatsApp ni navegador.</p>
-            <button className="shrink-0 rounded-full bg-gradient-to-r from-pulso to-pulso-dark px-3 py-2 text-sm font-bold text-white"
-              onClick={async () => { await installEvt.prompt(); setInstallEvt(null) }}>
-              Instalar
-            </button>
-            <button className="shrink-0 text-slate-400" onClick={() => setInstallDismissed(true)}>✕</button>
-          </div>
-        </div>
-      )}
-      {!isStandalone && !installEvt && (
-        <div className="mx-auto mt-3 max-w-2xl px-4">
-          <p className="rounded-3xl bg-white p-3 text-center text-xs text-slate-600 shadow-md">
-            📲 Para instalarla: en Android toca ⋮ → “Instalar app” o “Agregar a pantalla de inicio”. En iPhone: Compartir → “Agregar a pantalla de inicio”.
-          </p>
-        </div>
-      )}
-
-      {/* Espacio reservado abajo (pb-56): el contenedor fijo de
-          GPS + música mide ~200 px en su punto más alto, así que el
-          contenido nunca queda tapado ni salta cuando aparece o se va
-          la barrita de GPS. */}
-      <main className="mx-auto max-w-2xl px-4 pb-56 pt-4">
+      <main className="mx-auto max-w-2xl px-4 pb-40 pt-4">
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
         {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} />}
@@ -156,7 +121,7 @@ export default function App() {
             que se estaba grabando y la música. Así el cronómetro, la ruta
             y el reproductor siguen vivos en cualquier pestaña. */}
         <div className={tab === 'entrenar' ? '' : 'hidden'}>
-          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })} />
+          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} />
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
@@ -164,17 +129,11 @@ export default function App() {
       </main>
 
       {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
-          fijo, siempre en el mismo sitio (encima de la navegación),
-          nunca dentro de una pestaña ni en el flujo de Entrenar. Antes
-          el reproductor pasaba de estar en el flujo (Entrenar) a fijo
-          (las demás pestañas), y la barrita GPS y el botón + tenían
-          cada uno su propio `bottom` calculado, así que todo saltaba
-          al cambiar de pestaña o al empezar/pausar el GPS. Ahora el
-          orden es fijo (GPS arriba, música abajo), el contenedor no
-          se mueve y el espacio está reservado con pb-56 en <main>.
-          En Entrenar el reproductor se expande en ese mismo lugar
-          (hoja con scroll); en las demás pestañas se recoge a
-          mini-barra, sin cambiar de padre ni desmontarse. */}
+          fijo, siempre en el mismo sitio (encima de la navegación).
+          La música empieza recogida en mini-barra en TODAS las
+          pestañas (también en Entrenar) y solo se expande a una hoja
+          baja de 40vh cuando Luis la abre; al cambiar de pestaña se
+          recoge sola. Así no tapa el contenido ni la barra inferior. */}
       <div id="pulso-music" className="fixed bottom-[64px] left-0 right-0 z-20 mx-auto max-w-2xl px-3">
         {tab !== 'entrenar' && activity.gps?.active && (
           <button
@@ -191,20 +150,22 @@ export default function App() {
         <MusicPlayer
           profileId={profile.id}
           compact={tab !== 'entrenar'}
+          expanded={musicExpanded}
+          onExpandedChange={setMusicExpanded}
           onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
           onGoTrain={() => setTab('entrenar')}
         />
       </div>
 
-      {/* Botón flotante para crear sesión. Se esconde en Entrenar,
-          donde la hoja de música expandida ocuparía ese hueco, y en
-          las demás pestañas va siempre encima del contenedor fijo
-          (navegación 64 + mini-barra ~80 + margen): con GPS activo
-          la barrita añade 52 px. Solo hay dos posiciones fijas, no
-          salta al cambiar de pestaña. */}
-      {tab !== 'entrenar' && (
+      {/* Botón flotante para crear sesión. Se esconde en Entrenar y
+          cuando la hoja de música está expandida, para no taparla ni
+          que ella lo tape. En las demás pestañas va siempre encima
+          del contenedor fijo (navegación 64 + mini-barra ~56 + margen
+          16 = 136, redondeado a 144): con GPS activo la barrita añade
+          52 px. Solo dos posiciones fijas, no salta. */}
+      {tab !== 'entrenar' && !musicExpanded && (
         <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
-          className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'bottom-[208px]' : 'bottom-[156px]'}`}>
+          className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'bottom-[196px]' : 'bottom-[144px]'}`}>
           +
         </button>
       )}

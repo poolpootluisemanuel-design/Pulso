@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Profile } from '../lib/types'
 import { LEVELS, SPORTS, ZONES } from '../lib/types'
-import { Card, Empty, Tag } from './ui'
+import { Card, Empty, Tag, selectCls } from './ui'
 
 export default function Search({ profiles, meId }: { profiles: Profile[]; meId: string }) {
   const [sport, setSport] = useState('')
@@ -25,19 +25,19 @@ export default function Search({ profiles, meId }: { profiles: Profile[]; meId: 
       <h2 className="text-2xl font-black text-teal-dark">Buscar compañero</h2>
       <Card>
         <div className="grid grid-cols-2 gap-2">
-          <select className="rounded-xl border border-slate-300 px-3 py-2" value={sport} onChange={(e) => setSport(e.target.value)}>
+          <select className={selectCls} value={sport} onChange={(e) => setSport(e.target.value)}>
             <option value="">Deporte</option>
             {SPORTS.map((s) => <option key={s}>{s}</option>)}
           </select>
-          <select className="rounded-xl border border-slate-300 px-3 py-2" value={level} onChange={(e) => setLevel(e.target.value)}>
+          <select className={selectCls} value={level} onChange={(e) => setLevel(e.target.value)}>
             <option value="">Nivel</option>
             {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
-          <select className="rounded-xl border border-slate-300 px-3 py-2" value={zone} onChange={(e) => setZone(e.target.value)}>
+          <select className={selectCls} value={zone} onChange={(e) => setZone(e.target.value)}>
             <option value="">Zona</option>
             {ZONES.map((z) => <option key={z}>{z}</option>)}
           </select>
-          <select className="rounded-xl border border-slate-300 px-3 py-2" value={day} onChange={(e) => setDay(e.target.value)}>
+          <select className={selectCls} value={day} onChange={(e) => setDay(e.target.value)}>
             <option value="">Día</option>
             {['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'].map((d) => <option key={d}>{d}</option>)}
           </select>

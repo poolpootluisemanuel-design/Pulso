@@ -98,7 +98,7 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
           (montado en App); este botón baja hasta él. */}
       <button onClick={onShowMusic} className="w-full rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-md shadow-night/5">
         <p className="text-lg font-bold">🎵 Música para entrenar</p>
-        <p className="text-sm text-slate-500">YouTube o música local. Sigue sonando aunque cambies de pestaña. Toca para ir al reproductor ↓</p>
+        <p className="text-sm text-slate-500">YouTube o música local. Sigue sonando aunque cambies de pestaña. Toca para abrir el reproductor ▲</p>
       </button>
       <CoachPlan profile={profile} workouts={workouts} onRefresh={onRefresh} />
 
