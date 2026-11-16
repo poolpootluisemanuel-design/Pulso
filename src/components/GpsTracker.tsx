@@ -49,9 +49,17 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
   const [distanceKm, setDistanceKm] = useState(saved?.distanceKm || 0)
   const [error, setError] = useState(saved ? 'Tienes una grabación sin terminar. Toca Reanudar para seguir donde ibas.' : '')
   const [points, setPoints] = useState<Point[]>(saved?.points || [])
+  // Pausa automática por estar parado: se detecta deriva del GPS (la
+  // posición salta sola 5-15 m sin moverse, sobre todo en modo avión o
+  // dentro de casa) y se deja de sumar distancia hasta moverse de verdad.
+  const [autoPaused, setAutoPaused] = useState(false)
   const watchId = useRef<number | null>(null)
   const lastPoint = useRef<Point | null>(null)
-  const lastTime = useRef<number>(0)
+  const lastFixAt = useRef<number>(0)
+  // Ventana de 30 s para detectar parado: distancia real aceptada en ella.
+  const stillWindowStart = useRef<number>(0)
+  const stillWindowDistKm = useRef<number>(0)
+  const autoPausedRef = useRef(false)
 
   // Cronómetro
   useEffect(() => {
@@ -103,19 +111,62 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
     watchId.current = null
   }
 
+  function setAutoPausedBoth(v: boolean) {
+    autoPausedRef.current = v
+    setAutoPaused(v)
+  }
+
   function startWatch(from: Point) {
     lastPoint.current = from
-    lastTime.current = Date.now()
+    lastFixAt.current = Date.now()
+    stillWindowStart.current = Date.now()
+    stillWindowDistKm.current = 0
+    setAutoPausedBoth(false)
     watchId.current = navigator.geolocation.watchPosition(
       (pos2) => {
         if (pos2.coords.accuracy > 25) return // punto poco preciso, se descarta
+        const now = Date.now()
         const next = { lat: pos2.coords.latitude, lng: pos2.coords.longitude }
         const prev = lastPoint.current
-        if (!prev) { lastPoint.current = next; return }
+        if (!prev) { lastPoint.current = next; lastFixAt.current = now; return }
         const d = haversineKm(prev, next)
-        if (d < 0.003) return // menos de 3 m: ruido del GPS, se ignora
+        // Tiempo desde la última lectura válida: para la velocidad implícita.
+        const dtSec = Math.max(0.5, (now - lastFixAt.current) / 1000)
+        lastFixAt.current = now
         if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
+        // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
+        // caminando. La deriva salta así; el movimiento real no.
+        const speedMs = (d * 1000) / dtSec
+        const maxSpeedMs = sport === 'Ciclismo' ? 15 : sport === 'Correr' ? 6 : 2.5
+        if (speedMs > maxSpeedMs) return
+        // Ventana de 30 s: si en 30 s no se acumuló movimiento real
+        // (menos de 10 m), estás parado: entra la pausa automática y los
+        // saltos de deriva ya no se suman. El cronómetro sigue corriendo.
+        if (now - stillWindowStart.current >= 30000) {
+          const wasStill = stillWindowDistKm.current < 0.010
+          stillWindowStart.current = now
+          stillWindowDistKm.current = 0
+          if (wasStill) setAutoPausedBoth(true)
+        }
+        if (autoPausedRef.current) {
+          // Parado: solo un desplazamiento grande (>= 15 m desde el ancla)
+          // y con buena precisión reanuda el conteo. Los saltos chicos de
+          // deriva no mueven el ancla, así que no se acumulan.
+          if (d < 0.015 || pos2.coords.accuracy > 15) return
+          setAutoPausedBoth(false)
+          stillWindowStart.current = now
+          stillWindowDistKm.current = 0
+        } else {
+          // Umbral de ruido: menos de 8 m desde el ancla se ignora y el
+          // ancla NO se mueve, así el movimiento real lento (caminar 1-2 m
+          // por lectura) se acumula hasta pasar 8 m y sí se suma, mientras
+          // que los saltos de deriva quedan atrapados alrededor del ancla.
+          // Con señal floja (accuracy > 15 m) el umbral sube a 10 m.
+          const minMoveKm = pos2.coords.accuracy > 15 ? 0.010 : 0.008
+          if (d < minMoveKm) return
+        }
         lastPoint.current = next
+        stillWindowDistKm.current += d
         setDistanceKm((km) => km + d)
         setPoints((pts) => [...pts, next])
       },
@@ -131,6 +182,19 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
     setStatus('paused')
   }
 
+  // El primer punto también pasa el filtro de precisión: antes
+  // getCurrentPosition aceptaba cualquier accuracy, así que la grabación
+  // podía arrancar anclada a un punto con ±50 m de error y de ahí salían
+  // los primeros saltos fantasma. Si la señal es muy débil, no arranca
+  // y pide salir al aire libre, en vez de inventar distancia.
+  function acceptFirstFix(pos: GeolocationPosition, onOk: (p: Point) => void) {
+    if (pos.coords.accuracy > 25) {
+      setError(`Señal GPS muy débil (precisión ±${Math.round(pos.coords.accuracy)} m). Sal al aire libre, espera unos segundos y vuelve a tocar Iniciar.`)
+      return
+    }
+    onOk({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+  }
+
   function resume() {
     setError('')
     if (!('geolocation' in navigator)) {
@@ -139,12 +203,13 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
-        // si no, este es el primer punto.
-        if (points.length === 0) setPoints([p])
-        setStatus('recording')
-        startWatch(p)
+        acceptFirstFix(pos, (p) => {
+          // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
+          // si no, este es el primer punto.
+          if (points.length === 0) setPoints([p])
+          setStatus('recording')
+          startWatch(p)
+        })
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
       { enableHighAccuracy: true, timeout: 10000 }
@@ -159,10 +224,11 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        setPoints([p])
-        setStatus('recording')
-        startWatch(p)
+        acceptFirstFix(pos, (p) => {
+          setPoints([p])
+          setStatus('recording')
+          startWatch(p)
+        })
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
       { enableHighAccuracy: true, timeout: 10000 }
@@ -224,10 +290,13 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
           <div className="grid grid-cols-3 gap-2 text-center">
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : distanceKm < 0.01 ? '—' : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
           </div>
           <RouteMap pts={points} />
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : '● Grabando… no cierres la app'}</p>
+          {autoPaused && status === 'recording' && (
+            <p className="rounded-xl bg-amber-50 p-2 text-center text-sm text-amber-800">⏸ Parece que estás parado — GPS en pausa automática. La distancia no se suma hasta que te muevas de verdad. El tiempo sigue corriendo.</p>
+          )}
           <p className="text-center text-xs text-slate-500">La pantalla se mantiene encendida mientras grabas, para que el GPS y la música no se pausen.</p>
           {error && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">{error}</p>}
           <div className="flex gap-2">
