@@ -2,5 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-body { background: #e6edf5; }
+body { background: #f0f4f9; color: #0a1b2e; }
 input, select, textarea { font-size: 16px; }
+
+@keyframes pulso-line {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(220%); }
+}
+.pulse-line { animation: pulso-line 2.4s linear infinite; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }

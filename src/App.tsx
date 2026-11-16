@@ -72,36 +72,57 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-sage-100">
-        <p className="text-lg font-bold text-night">Cargando PULSO…</p>
+      <div className="flex min-h-screen items-center justify-center bg-night">
+        <div className="text-center">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-pulso text-3xl font-black text-white">P</div>
+          <p className="text-lg font-black text-white">Cargando PULSO…</p>
+        </div>
       </div>
     )
   }
 
   if (!user || !profile) {
     return (
-      <div className="min-h-screen bg-sage-100 font-sans text-slate-800">
+      <div className="min-h-screen bg-night-50 font-sans text-slate-800">
         <Auth onDone={() => { setLoading(true); loadAll() }} />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-sage-100 font-sans text-slate-800">
-      <header className="sticky top-0 z-10 bg-night px-4 py-3 text-white shadow">
+    <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+      {/* Encabezado estilo app de Muse: logo, avatar y notificaciones */}
+      <header className="sticky top-0 z-10 bg-night px-4 py-3 text-white shadow-lg shadow-night/20">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
-          <p className="text-xl font-black tracking-wide">PULSO</p>
-          <p className="text-xs opacity-90">
-            {mode === 'supabase' ? '● En línea' : '● Modo local (demo)'} · {profile.zone}
-          </p>
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pulso text-lg font-black">P</div>
+            <div>
+              <p className="text-lg font-black leading-none tracking-wide">PULSO</p>
+              <p className="text-[11px] text-white/70">Entrena con pulso · {profile.zone}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90 sm:block">
+              {mode === 'supabase' ? '● En línea' : '● Modo local'}
+            </span>
+            <button onClick={() => setTab('comunidad')} aria-label="Notificaciones y comunidad"
+              className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-lg">
+              🔔
+              {posts.length > 0 && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-pulso ring-2 ring-night" />}
+            </button>
+            <button onClick={() => setTab('perfil')} aria-label="Mi perfil"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-base font-black">
+              {profile.name.slice(0, 1).toUpperCase()}
+            </button>
+          </div>
         </div>
       </header>
 
       {!isStandalone && installEvt && !installDismissed && (
         <div className="mx-auto mt-3 max-w-2xl px-4">
-          <div className="flex items-center justify-between gap-2 rounded-2xl bg-white p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-2 rounded-3xl bg-white p-3 shadow-md">
             <p className="text-sm"><strong>Instala PULSO</strong> en tu pantalla para abrirla como app, sin WhatsApp ni navegador.</p>
-            <button className="shrink-0 rounded-full bg-coral px-3 py-2 text-sm font-bold text-white"
+            <button className="shrink-0 rounded-full bg-gradient-to-r from-pulso to-pulso-dark px-3 py-2 text-sm font-bold text-white"
               onClick={async () => { await installEvt.prompt(); setInstallEvt(null) }}>
               Instalar
             </button>
@@ -111,13 +132,13 @@ export default function App() {
       )}
       {!isStandalone && !installEvt && (
         <div className="mx-auto mt-3 max-w-2xl px-4">
-          <p className="rounded-2xl bg-white p-3 text-center text-xs text-slate-600 shadow-sm">
+          <p className="rounded-3xl bg-white p-3 text-center text-xs text-slate-600 shadow-md">
             📲 Para instalarla: en Android toca ⋮ → “Instalar app” o “Agregar a pantalla de inicio”. En iPhone: Compartir → “Agregar a pantalla de inicio”.
           </p>
         </div>
       )}
 
-      <main className="mx-auto max-w-2xl px-4 pb-28 pt-4">
+      <main className="mx-auto max-w-2xl px-4 pb-32 pt-4">
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
         {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} />}
@@ -127,13 +148,19 @@ export default function App() {
         {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]">
+      {/* Botón flotante para crear sesión */}
+      <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
+        className="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40">
+        +
+      </button>
+
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex max-w-2xl">
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-1 flex-col items-center py-2 text-[11px] font-semibold ${tab === t.id ? 'text-coral' : 'text-slate-500'}`}>
+            <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-1 flex-col items-center py-2 text-[11px] font-bold ${tab === t.id ? 'text-pulso' : 'text-slate-400'}`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}
-              {tab === t.id && <span className="mt-0.5 h-1 w-1 rounded-full bg-coral" />}
+              {tab === t.id && <span className="mt-1 h-1 w-6 rounded-full bg-pulso" />}
             </button>
           ))}
         </div>

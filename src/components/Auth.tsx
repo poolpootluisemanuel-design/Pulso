@@ -3,6 +3,11 @@ import { resetPassword, setNewPasswordLocal, signIn, signUp } from '../lib/store
 import { mode } from '../lib/store'
 import { Btn, Card, Field, inputCls } from './ui'
 
+// Foto libre (Unsplash, verificada 200): corredora al amanecer.
+const HERO_IMG = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=1200&q=80&auto=format&fit=crop'
+
+const SPORT_CHIPS = ['🏃 Running', '🎾 Pádel', '💪 CrossFit', '🚴 Ciclismo', '🏄 Surf', '🏊 Natación']
+
 export default function Auth({ onDone }: { onDone: () => void }) {
   const [view, setView] = useState<'login' | 'register' | 'recover'>('login')
   const [name, setName] = useState('')
@@ -53,80 +58,113 @@ export default function Auth({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-10 pt-10">
-      <div className="mb-6 text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-pulso text-3xl font-black text-white">P</div>
-        <h1 className="text-4xl font-black text-night">PULSO</h1>
-        <p className="font-bold text-pulso">Entrena con pulso</p>
-        <p className="text-slate-600">Entrena acompañado en Cancún y la Riviera Maya</p>
-        <p className="mt-1 text-xs text-slate-500">Strava te dice qué hiciste. PULSO te consigue con quién hacerlo mañana.</p>
+    <div className="mx-auto min-h-screen max-w-md bg-night-50 pb-8">
+      {/* Hero visual, como la app de Muse: foto + degradado azul noche → rojo */}
+      <div className="relative overflow-hidden">
+        <img src={HERO_IMG} alt="Entrenando al amanecer en Cancún" className="h-72 w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-b from-night/70 via-night/35 to-night" />
+        <div className="absolute inset-x-0 bottom-0 p-5 text-white">
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pulso text-3xl font-black shadow-lg shadow-pulso/40">P</div>
+            <div>
+              <h1 className="text-4xl font-black tracking-wide">PULSO</h1>
+              <p className="font-bold text-pulso-light">Entrena con pulso</p>
+            </div>
+          </div>
+          <p className="mt-3 text-lg font-bold leading-snug">Entrena acompañado en Cancún y la Riviera Maya</p>
+          <p className="text-sm text-white/80">Strava te dice qué hiciste. PULSO te consigue con quién hacerlo mañana.</p>
+          <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+            {SPORT_CHIPS.map((s) => (
+              <span key={s} className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white backdrop-blur">{s}</span>
+            ))}
+          </div>
+        </div>
+        {/* Línea de pulso */}
+        <div className="absolute bottom-0 left-0 right-0 h-1 overflow-hidden bg-white/10">
+          <div className="pulse-line h-full w-1/3 bg-pulso" />
+        </div>
       </div>
 
-      <Card>
-        <h2 className="mb-4 text-lg font-bold">
-          {view === 'login' ? 'Entra a tu cuenta' : view === 'register' ? 'Crea tu cuenta' : 'Recupera tu cuenta'}
-        </h2>
-        {mode === 'local' && (
-          <p className="mb-3 rounded-xl bg-amber-50 p-2 text-xs text-amber-800">
-            Modo local de demostración: aún no hay Supabase conectado. Las cuentas se guardan solo en este teléfono.
+      {/* Tarjeta de acceso, pegada al hero, sin vacío */}
+      <div className="px-4">
+        <Card className="-mt-5">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="text-xl font-black text-night">
+              {view === 'login' ? 'Entra a tu cuenta' : view === 'register' ? 'Crea tu cuenta' : 'Recupera tu cuenta'}
+            </h2>
+            <span className="rounded-full bg-pulso/10 px-2.5 py-1 text-xs font-bold text-pulso">Cancún 🌊</span>
+          </div>
+          <p className="mb-4 text-sm text-slate-500">
+            {view === 'login'
+              ? 'Tu semana, tus sesiones y tu racha te están esperando.'
+              : view === 'register'
+                ? 'Únete a la comunidad para entrenar acompañado.'
+                : 'Te ayudamos a volver a entrar, sin crear otra cuenta.'}
           </p>
-        )}
-        <form onSubmit={submit} className="space-y-3">
-          {view === 'register' && (
-            <Field label="Tu nombre">
-              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required placeholder="Luis" />
+          <form onSubmit={submit} className="space-y-3">
+            {view === 'register' && (
+              <Field label="Tu nombre">
+                <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required placeholder="Luis" />
+              </Field>
+            )}
+            <Field label="Correo">
+              <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="tu@correo.com" />
             </Field>
-          )}
-          <Field label="Correo">
-            <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="tu@correo.com" />
-          </Field>
-          {view !== 'recover' && (
-            <Field label="Contraseña">
-              <div className="flex gap-2">
-                <input className={inputCls} type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Mínimo 6 caracteres" />
-                <button type="button" onClick={() => setShow(!show)} className="rounded-xl bg-sage-100 px-3 text-sm font-semibold text-teal-dark">
-                  {show ? 'Ocultar' : 'Mostrar'}
-                </button>
-              </div>
-            </Field>
-          )}
-          {err && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{err}</p>}
-          {msg && <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">{msg}</p>}
-          <Btn type="submit" variant="coral" disabled={busy} className="w-full">
-            {busy ? 'Espera…' : view === 'login' ? 'Entrar' : view === 'register' ? 'Crear mi cuenta' : 'Enviar recuperación'}
-          </Btn>
-        </form>
-
-        {view === 'recover' && mode === 'local' && (
-          <form onSubmit={localRecover} className="mt-3 space-y-3 border-t pt-3">
-            <Field label="Contraseña nueva (solo modo local)">
-              <input className={inputCls} type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Mínimo 6 caracteres" />
-            </Field>
-            <Btn type="submit" variant="teal" className="w-full">Poner contraseña nueva y entrar</Btn>
+            {view !== 'recover' && (
+              <Field label="Contraseña">
+                <div className="flex gap-2">
+                  <input className={inputCls} type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Mínimo 6 caracteres" />
+                  <button type="button" onClick={() => setShow(!show)} className="shrink-0 rounded-2xl bg-night-100 px-3 text-sm font-bold text-teal-dark">
+                    {show ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </div>
+              </Field>
+            )}
+            {err && <p className="rounded-2xl bg-red-50 p-2.5 text-sm font-semibold text-red-700">{err}</p>}
+            {msg && <p className="rounded-2xl bg-teal/10 p-2.5 text-sm font-semibold text-teal-dark">{msg}</p>}
+            <Btn type="submit" variant="coral" disabled={busy} className="w-full py-3 text-base">
+              {busy ? 'Espera…' : view === 'login' ? 'Entrar a PULSO →' : view === 'register' ? 'Crear mi cuenta' : 'Enviar recuperación'}
+            </Btn>
           </form>
-        )}
 
-        <div className="mt-4 space-y-1 text-center text-sm">
-          {view === 'login' && (
-            <>
-              <button className="block w-full text-teal-dark underline" onClick={() => { setView('recover'); setErr(''); setMsg('') }}>
-                ¿No entra tu contraseña? Recupera tu cuenta
-              </button>
-              <button className="block w-full text-slate-600 underline" onClick={() => setView('register')}>
-                ¿No tienes cuenta? Crea una
-              </button>
-            </>
+          {view === 'recover' && mode === 'local' && (
+            <form onSubmit={localRecover} className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+              <Field label="Contraseña nueva (solo modo local)">
+                <input className={inputCls} type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Mínimo 6 caracteres" />
+              </Field>
+              <Btn type="submit" variant="teal" className="w-full">Poner contraseña nueva y entrar</Btn>
+            </form>
           )}
-          {view !== 'login' && (
-            <button className="block w-full text-slate-600 underline" onClick={() => setView('login')}>
-              Ya tengo cuenta, entrar
-            </button>
-          )}
+
+          <div className="mt-4 space-y-1.5 text-center text-sm">
+            {view === 'login' && (
+              <>
+                <button className="block w-full font-semibold text-teal-dark underline" onClick={() => { setView('recover'); setErr(''); setMsg('') }}>
+                  ¿No entra tu contraseña? Recupera tu cuenta
+                </button>
+                <button className="block w-full text-slate-600 underline" onClick={() => setView('register')}>
+                  ¿No tienes cuenta? Crea una
+                </button>
+              </>
+            )}
+            {view !== 'login' && (
+              <button className="block w-full text-slate-600 underline" onClick={() => setView('login')}>
+                Ya tengo cuenta, entrar
+              </button>
+            )}
+          </div>
+        </Card>
+
+        <div className="mt-4 flex items-center justify-center gap-4 text-center">
+          <p className="text-xs font-bold text-night">🏃 Sesiones cada semana</p>
+          <p className="text-xs font-bold text-night">🏅 Retos y rachas</p>
+          <p className="text-xs font-bold text-night">🤝 Con quién entrenar</p>
         </div>
-      </Card>
-      <p className="mt-4 text-center text-xs text-slate-500">
-        Al crear tu cuenta aceptas que tu nombre, deportes y zona se vean para encontrar compañero. Tu correo nunca se muestra a otros.
-      </p>
+        <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+          Al crear tu cuenta aceptas que tu nombre, deportes y zona se vean para encontrar compañero. Tu correo nunca se muestra a otros.
+          {mode === 'local' && ' · Modo local (demo): cuentas solo en este teléfono.'}
+        </p>
+      </div>
     </div>
   )
 }
