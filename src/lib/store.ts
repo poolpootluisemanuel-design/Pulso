@@ -94,13 +94,35 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     const { data } = await supabase.auth.getUser()
     if (!data.user) return null
     const { data: prof } = await supabase.from('profiles').select('name').eq('id', data.user.id).maybeSingle()
-    return { id: data.user.id, email: data.user.email || '', name: (prof?.name as string) || 'Sin nombre' }
+    if (!prof) {
+      // Cuenta de Auth existe pero sin fila en profiles (p. ej. creada
+      // antes del arreglo de RLS): se crea el perfil sola al entrar.
+      await ensureSupabaseProfile(data.user.id, data.user.email || '', (data.user.user_metadata?.name as string) || '')
+    }
+    const name = (prof?.name as string) || (data.user.user_metadata?.name as string) || 'Sin nombre'
+    return { id: data.user.id, email: data.user.email || '', name }
   }
   const id = getSessionId()
   if (!id) return null
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.id === id)
   return u ? { id: u.id, email: u.email, name: u.name } : null
+}
+
+// Crea la fila en profiles si falta (repara cuentas de Auth creadas
+// antes del arreglo de RLS). Solo se llama con sesión activa, así que
+// auth.uid() = id y la política RLS lo permite. Nunca lanza: si falla,
+// el usuario entra igual y se reintenta en el siguiente inicio.
+async function ensureSupabaseProfile(userId: string, email: string, name: string): Promise<void> {
+  if (!supabaseConfigured || !supabase) return
+  try {
+    const cleanName = name.trim() || email.split('@')[0] || 'Sin nombre'
+    const { error } = await supabase.from('profiles').upsert({
+      id: userId, name: cleanName, email: email.trim().toLowerCase(),
+      zone: 'Cancún centro', bio: '', beginner: true, sports: [], availability: [],
+    }, { onConflict: 'id' })
+    if (error) console.warn('No se pudo crear el perfil en Supabase:', error.message)
+  } catch { /* entra igual, se reintenta luego */ }
 }
 
 export async function signUp(name: string, email: string, password: string): Promise<AuthUser> {
@@ -113,9 +135,36 @@ export async function signUp(name: string, email: string, password: string): Pro
     })
     if (error) throw new Error(error.message)
     if (!data.user) throw new Error('No se pudo crear la cuenta. Revisa tu correo, puede pedir confirmación.')
+    // Si Supabase tiene la confirmación de correo activada, signUp no
+    // devuelve sesión: sin sesión, auth.uid() es null y el insert del
+    // perfil lo rechaza RLS. Se entra con la misma contraseña para
+    // obtener la sesión antes de insertar el perfil.
+    let session = data.session
+    if (!session) {
+      const { data: siData, error: siErr } = await supabase.auth.signInWithPassword({ email: cleanEmail, password })
+      if (siErr || !siData.session) {
+        const msg = (siErr?.message || '').toLowerCase()
+        if (msg.includes('email not confirmed') || msg.includes('not confirmed') || msg.includes('confirm')) {
+          throw new Error('Revisa tu correo para confirmar la cuenta y luego entra. La cuenta se creó, solo falta confirmarla.')
+        }
+        throw new Error('Cuenta creada. Revisa tu correo para confirmar la cuenta y luego entra.')
+      }
+      session = siData.session
+    }
+    void session
     const profile: Profile = { id: data.user.id, name: name.trim(), email: cleanEmail, zone: 'Cancún centro', bio: '', beginner: true, sports: [], availability: [] }
     const { error: pErr } = await supabase.from('profiles').insert({ ...profile, sports: [] })
-    if (pErr) throw new Error('Cuenta creada, pero no se guardó el perfil: ' + pErr.message)
+    if (pErr) {
+      // El perfil no quedó guardado, pero la cuenta de Auth sí existe:
+      // se intenta crearlo de nuevo con la sesión ya activa, y si
+      // aun así falla, al entrar se repara solo. No se deja al usuario
+      // con un error críptico de RLS.
+      if (pErr.message.toLowerCase().includes('row-level security')) {
+        await ensureSupabaseProfile(data.user.id, cleanEmail, name.trim())
+        return { id: data.user.id, email: cleanEmail, name: name.trim() }
+      }
+      throw new Error('Cuenta creada, pero no se guardó el perfil: ' + pErr.message)
+    }
     return { id: data.user.id, email: cleanEmail, name: name.trim() }
   }
   const users = load<LocalUser[]>('users', [])
@@ -138,7 +187,12 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
     if (error) throw new Error('Correo o contraseña incorrectos.')
     if (!data.user) throw new Error('No se pudo entrar.')
     const { data: prof } = await supabase.from('profiles').select('name').eq('id', data.user.id).maybeSingle()
-    return { id: data.user.id, email: cleanEmail, name: (prof?.name as string) || 'Sin nombre' }
+    if (!prof) {
+      // Cuenta de Auth existe pero sin fila en profiles: se crea sola.
+      await ensureSupabaseProfile(data.user.id, cleanEmail, (data.user.user_metadata?.name as string) || '')
+    }
+    const name = (prof?.name as string) || (data.user.user_metadata?.name as string) || 'Sin nombre'
+    return { id: data.user.id, email: cleanEmail, name }
   }
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.email === cleanEmail)

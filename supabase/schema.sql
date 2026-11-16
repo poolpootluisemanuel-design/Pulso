@@ -145,11 +145,15 @@ alter table businesses enable row level security;
 -- en la app aunque esté en la tabla).
 drop policy if exists "perfiles visibles" on profiles;
 create policy "perfiles visibles" on profiles for select using (true);
+drop policy if exists "crear perfil propio" on profiles;
+create policy "crear perfil propio" on profiles for insert with check (auth.uid() = id);
 drop policy if exists "cada quien edita su perfil" on profiles;
 create policy "cada quien edita su perfil" on profiles for all using (auth.uid() = id);
 
 drop policy if exists "deportes visibles" on profile_sports;
 create policy "deportes visibles" on profile_sports for select using (true);
+drop policy if exists "crear deportes propios" on profile_sports;
+create policy "crear deportes propios" on profile_sports for insert with check (auth.uid() = profile_id);
 drop policy if exists "cada quien edita sus deportes" on profile_sports;
 create policy "cada quien edita sus deportes" on profile_sports for all using (auth.uid() = profile_id);
 
