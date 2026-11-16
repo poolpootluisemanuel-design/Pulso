@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { haversineKm, paceMinKm } from '../lib/utils'
 import { Btn, Card } from './ui'
+import MapView from './MapView'
 
 interface Point { lat: number; lng: number }
 
@@ -244,25 +245,25 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
   const ss = String(seconds % 60).padStart(2, '0')
 
-  // Mini mapa de la ruta (proyección simple a SVG, sin librerías externas).
-  function RouteMap({ pts, h = 140 }: { pts: Point[]; h?: number }) {
-    if (pts.length < 2) return <p className="py-4 text-center text-sm text-slate-500">Tu ruta se dibuja aquí mientras caminas.</p>
-    const lats = pts.map((p) => p.lat)
-    const lngs = pts.map((p) => p.lng)
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats)
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
-    const w = 320
-    const x = (lng: number) => 10 + ((lng - minLng) / Math.max(maxLng - minLng, 0.0001)) * (w - 20)
-    const y = (lat: number) => h - 10 - ((lat - minLat) / Math.max(maxLat - minLat, 0.0001)) * (h - 20)
-    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.lng).toFixed(1)},${y(p.lat).toFixed(1)}`).join(' ')
-    return (
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full rounded-xl bg-sage-100">
-        <path d={d} fill="none" stroke="#14B8A6" strokeWidth="3" strokeLinecap="round" />
-        <circle cx={x(pts[0].lng)} cy={y(pts[0].lat)} r="5" fill="#22c55e" />
-        <circle cx={x(pts[pts.length - 1].lng)} cy={y(pts[pts.length - 1].lat)} r="5" fill="#E63946" />
-      </svg>
-    )
-  }
+  // Mapa real de la ruta (Leaflet + OpenStreetMap): la ruta se dibuja
+  // en vivo, el mapa sigue tu posición. Sin internet no carga las
+  // calles, pero la ruta y la distancia con GPS sí se siguen grabando.
+  // El SVG viejo se quitó: el mapa real lo reemplaza en vivo y en el
+  // resumen. Marcadores: inicio verde, posición actual roja.
+  const routeMarkers = points.length > 0 ? [
+    { key: 'inicio', lat: points[0].lat, lng: points[0].lng, emoji: '🟢', color: '#22c55e', popupHtml: '<b>Inicio</b>' },
+    ...(points.length > 1 ? [{ key: 'ahora', lat: points[points.length - 1].lat, lng: points[points.length - 1].lng, emoji: '📍', color: '#E63946', popupHtml: '<b>Estás aquí</b>' }] : []),
+  ] : []
+  const routeMap = (
+    <MapView
+      center={points.length > 0 ? points[points.length - 1] : undefined}
+      points={points}
+      markers={routeMarkers}
+      height={220}
+      follow
+      offlineNote="📶 Sin internet: el mapa no carga las calles, pero tu ruta se sigue grabando con GPS."
+    />
+  )
 
   return (
     <Card>
@@ -292,7 +293,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : distanceKm < 0.01 ? '—' : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
           </div>
-          <RouteMap pts={points} />
+          {routeMap}
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : '● Grabando… no cierres la app'}</p>
           {autoPaused && status === 'recording' && (
             <p className="rounded-xl bg-amber-50 p-2 text-center text-sm text-amber-800">⏸ Parece que estás parado — GPS en pausa automática. La distancia no se suma hasta que te muevas de verdad. El tiempo sigue corriendo.</p>
@@ -312,7 +313,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
         <div className="space-y-3">
           <h4 className="font-bold">Resumen de tu {sport.toLowerCase()}</h4>
           <p className="text-sm text-slate-600">Tiempo: {mm}:{ss} · Distancia: {distanceKm.toFixed(2)} km · Ritmo: {paceMinKm(distanceKm, minutes)}</p>
-          <RouteMap pts={points} h={160} />
+          {routeMap}
           <Btn variant="coral" className="w-full" onClick={() => onSave({ sport, durationMin: Math.max(1, Math.round(minutes)), distanceKm: Math.round(distanceKm * 100) / 100, route: points })}>
             Guardar entrenamiento
           </Btn>

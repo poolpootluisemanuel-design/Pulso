@@ -36,6 +36,10 @@ export interface SessionItem {
   host_id: string
   host_name: string
   notes?: string
+  /** Coordenadas opcionales del lugar (para el mapa de sesiones).
+   *  Las sesiones viejas no las tienen y solo salen en la lista. */
+  lat?: number
+  lng?: number
 }
 
 export interface Rsvp {
@@ -130,7 +134,7 @@ export const SPORTS = [
   'Caminata',
 ] as const
 
-export const ZONES = ['Cancún centro', 'Zona Hotelera', 'Puerto Cancún', 'Playa del Carmen', 'Tulum', 'Riviera Maya'] as const
+export const ZONES = ['Cancún centro', 'Zona Hotelera', 'Puerto Cancún', 'Isla Mujeres', 'Puerto Morelos', 'Playa del Carmen', 'Tulum', 'Cozumel', 'Riviera Maya'] as const
 
 export const LEVELS: Level[] = ['principiante', 'intermedio', 'avanzado']
 export const DAYS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']

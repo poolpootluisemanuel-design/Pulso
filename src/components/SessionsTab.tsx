@@ -4,6 +4,22 @@ import { LEVELS, SPORTS, ZONES } from '../lib/types'
 import { cancelRsvp, createSession, joinSession, listRsvps } from '../lib/store'
 import { formatDate, todayISO, weekdayName } from '../lib/utils'
 import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
+import MapView, { CANCUN_CENTER } from './MapView'
+import type { MapMarker } from './MapView'
+
+const SPORT_EMOJI: Record<string, string> = {
+  running: '🏃', caminata: '🚶', pádel: '🎾', padel: '🎾', crossfit: '💪',
+  ciclismo: '🚴', surf: '🏄', natación: '🏊', gym: '🏋️', yoga: '🧘',
+}
+function sportEmoji(sport: string) {
+  return SPORT_EMOJI[sport.toLowerCase()] || '🏅'
+}
+
+// El popup del mapa es HTML: se escapan los textos del usuario para
+// que un título con < o " no rompa el marcador.
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
 
 export default function SessionsTab({ profile, sessions, onRefresh }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void }) {
   const [showForm, setShowForm] = useState(false)
@@ -17,10 +33,41 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [rsvps, setRsvps] = useState<Record<string, Rsvp[]>>({})
+  // Vista Lista / Mapa y ubicación del lugar al crear la sesión.
+  const [view, setView] = useState<'lista' | 'mapa'>('lista')
+  const [lat, setLat] = useState<number | null>(null)
+  const [lng, setLng] = useState<number | null>(null)
+  const [locBusy, setLocBusy] = useState(false)
+  const [locMsg, setLocMsg] = useState('')
 
   async function loadRsvps(id: string) {
     const list = await listRsvps(id)
     setRsvps((prev) => ({ ...prev, [id]: list }))
+  }
+
+  // "Usar mi ubicación": guarda las coordenadas actuales del teléfono
+  // como ubicación de la sesión. Es opcional: sin ella la sesión solo
+  // sale en la lista, no en el mapa.
+  function useMyLocation() {
+    setErr(''); setLocMsg('')
+    if (!('geolocation' in navigator)) {
+      setErr('Este teléfono o navegador no tiene GPS disponible.')
+      return
+    }
+    setLocBusy(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(pos.coords.latitude)
+        setLng(pos.coords.longitude)
+        setLocMsg(`📍 Ubicación guardada: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`)
+        setLocBusy(false)
+      },
+      () => {
+        setErr('No se pudo tomar tu ubicación. Revisa el permiso de ubicación para este sitio e inténtalo de nuevo.')
+        setLocBusy(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
   }
 
   async function create(e: React.FormEvent) {
@@ -32,12 +79,31 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
         place: place.trim(), zone: profile.zone,
         capacity: Number(capacity) || 4,
         host_id: profile.id, host_name: profile.name,
+        ...(lat !== null && lng !== null ? { lat, lng } : {}),
       })
       setMsg(`Sesión creada para ${weekdayName(date)} ${formatDate(date)}. ¡Compártela con tus compañeros!`)
-      setTitle(''); setPlace(''); setShowForm(false)
+      setTitle(''); setPlace(''); setLat(null); setLng(null); setLocMsg(''); setShowForm(false)
       onRefresh()
     } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo crear la sesión.') }
   }
+
+  // Solo las sesiones con coordenadas aparecen en el mapa.
+  const withCoords = sessions.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number')
+  const markers: MapMarker[] = withCoords.map((s) => {
+    const list = rsvps[s.id]
+    const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
+    return {
+      key: s.id,
+      lat: s.lat as number,
+      lng: s.lng as number,
+      emoji: sportEmoji(s.sport),
+      color: '#E63946',
+      popupHtml: `<b>${esc(s.title)}</b><br>${esc(s.sport)} · ${esc(s.level)}<br>${esc(weekdayName(s.date))} ${esc(formatDate(s.date))} · ${esc(s.time)}<br>${esc(s.place)}<br>Cupo ${confirmed}/${s.capacity} · ${esc(s.host_name)}`,
+    }
+  })
+  const mapCenter = withCoords.length > 0
+    ? { lat: withCoords[0].lat as number, lng: withCoords[0].lng as number }
+    : CANCUN_CENTER
 
   return (
     <div className="space-y-4">
@@ -72,6 +138,21 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
               <Field label="Hora"><input className={inputCls} type="time" value={time} onChange={(e) => setTime(e.target.value)} required /></Field>
             </div>
             <Field label="Lugar / cancha"><input className={inputCls} value={place} onChange={(e) => setPlace(e.target.value)} required placeholder="Ej. Cancha Tajamar" /></Field>
+            {/* Ubicación en el mapa: opcional. Si no se pone, la sesión
+                solo sale en la lista. */}
+            <div>
+              <p className="mb-1 text-sm font-medium text-slate-700">Ubicación en el mapa (opcional)</p>
+              <div className="flex gap-2">
+                <Btn type="button" variant="teal" className="flex-1" onClick={useMyLocation} disabled={locBusy}>
+                  {locBusy ? 'Tomando ubicación…' : '📍 Usar mi ubicación'}
+                </Btn>
+                {lat !== null && lng !== null && (
+                  <Btn type="button" variant="ghost" onClick={() => { setLat(null); setLng(null); setLocMsg('') }}>Quitar</Btn>
+                )}
+              </div>
+              {locMsg && <p className="mt-1 text-xs font-semibold text-teal-dark">{locMsg}</p>}
+              <p className="mt-1 text-xs text-slate-500">Si estás en el lugar de la sesión, guárdalo aquí y saldrá en el mapa.</p>
+            </div>
             <Field label="Zona">
               <select className={selectCls} value={profile.zone} disabled>
                 <option>{profile.zone}</option>
@@ -83,7 +164,26 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
         </Card>
       )}
 
-      {sessions.length === 0 ? <Empty text="No hay sesiones todavía. Crea la primera y compártela por WhatsApp." /> : (
+      {/* Vista Lista / Mapa */}
+      <div className="flex gap-2">
+        <button onClick={() => setView('lista')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
+        <button onClick={() => setView('mapa')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
+      </div>
+
+      {view === 'mapa' && (
+        <div className="space-y-2">
+          {withCoords.length === 0 ? (
+            <Empty text="Ninguna sesión tiene ubicación en el mapa todavía. Al crear una, toca «Usar mi ubicación» estando en el lugar." />
+          ) : (
+            <>
+              <MapView center={mapCenter} markers={markers} height={320} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+              <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {view === 'lista' && (sessions.length === 0 ? <Empty text="No hay sesiones todavía. Crea la primera e invita a tu grupo." /> : (
         <div className="space-y-2">
           {sessions.map((s) => {
             const list = rsvps[s.id]
@@ -91,7 +191,7 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
             const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
             return (
               <Card key={s.id}>
-                <div className="flex gap-2"><Tag>{s.sport}</Tag><Tag>{s.level}</Tag><Tag>{s.zone}</Tag></div>
+                <div className="flex gap-2"><Tag>{s.sport}</Tag><Tag>{s.level}</Tag><Tag>{s.zone}</Tag>{typeof s.lat === 'number' && <Tag>📍 En mapa</Tag>}</div>
                 <p className="mt-2 text-lg font-bold">{s.title}</p>
                 <p className="text-sm text-slate-600">{weekdayName(s.date)} {formatDate(s.date)} · {s.time} · {s.place}</p>
                 <p className="text-sm text-slate-500">Organiza {s.host_name} · Cupo {confirmed}/{s.capacity}</p>
@@ -116,7 +216,7 @@ export default function SessionsTab({ profile, sessions, onRefresh }: { profile:
             )
           })}
         </div>
-      )}
+      ))}
       <p className="text-center text-xs text-slate-500">Zonas disponibles: {ZONES.join(' · ')}</p>
     </div>
   )

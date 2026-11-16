@@ -7,7 +7,7 @@ comunidad y negocios locales.
 
 Esto es **tu** app: el código está en esta carpeta, la base de datos es
 tuya en Supabase, el hosting es tuyo en Vercel y el dominio será tuyo.
-No vive dentro de Muse ni de WhatsApp.
+No vive dentro de Muse: es tu app instalada, independiente.
 
 > **Fase 0 / MVP.** Esta es la base instalable. Ya funciona completa en
 > el teléfono como web app. Play Store es la fase 5 del plan.
@@ -28,7 +28,7 @@ No vive dentro de Muse ni de WhatsApp.
 | Retos y logros | Racha de días, medallas calculadas de tus entrenamientos, retos de 7 y 30 días |
 | Comunidad | Publicar en el muro local |
 | Negocios | Directorio básico de coaches, gyms y canchas (listo para crecer en la fase 4) |
-| Instalable (PWA) | Ícono en pantalla, abre a pantalla completa, sin navegador ni WhatsApp |
+| Instalable (PWA) | Ícono en pantalla, abre a pantalla completa, sin navegador |
 
 Diseño PULSO: fondo blanco / azul noche claro, azul noche oscuro en
 encabezado, rojo pulso como color principal en botones y rachas, y
@@ -140,7 +140,7 @@ la app lo dice y trabaja en local.
 - [ ] **Deploy en Vercel:** publicar con sus variables (paso C).
 - [ ] **Probar en su teléfono:** crear su cuenta real, instalarla desde
       su dominio y probar una sesión y una caminata con GPS.
-- [ ] **Primeros 15:** invitar por WhatsApp con el link de su dominio.
+- [ ] **Primeros 15:** invitar a tu grupo con el link de su dominio.
 - [ ] **Fase 4 — Negocios:** panel para que coaches/gyms/canchas publiquen
       sus clases y reservas.
 - [ ] **Fase 5 — Play Store:** cuenta de desarrollador de Google
@@ -173,7 +173,8 @@ activa-propia/
 │       ├── Search.tsx          Buscar compañero por filtros
 │       ├── SessionsTab.tsx     Crear sesión, cupo, lista de espera
 │       ├── Train.tsx           Entrenamiento manual + historial con ruta
-│       ├── GpsTracker.tsx      Grabar con GPS: tiempo, distancia, ritmo, ruta
+│       ├── GpsTracker.tsx      Grabar con GPS: tiempo, distancia, ritmo, ruta en mapa real
+│       ├── MapView.tsx         Mapa real (Leaflet + OpenStreetMap): ruta y sesiones
 │       ├── MusicPlayer.tsx     Música YouTube por tipo de entrenamiento + tu playlist
 │       ├── CoachPlan.tsx       Entrenador IA: formulario, plan semanal, tareas
 │       ├── Challenges.tsx      Retos y medallas

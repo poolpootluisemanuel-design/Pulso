@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AuthUser, Profile } from '../lib/types'
 import { DAYS, LEVELS, SPORTS, ZONES } from '../lib/types'
 import { changePassword, saveProfile, signOut } from '../lib/store'
+import { detectZone } from '../lib/utils'
 import { Btn, Card, Field, inputCls, selectCls } from './ui'
 
 export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { user: AuthUser; profile: Profile; onRefresh: () => void; onSignOut: () => void }) {
@@ -14,6 +15,37 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { us
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [showPw, setShowPw] = useState(false)
+  const [zoneMsg, setZoneMsg] = useState('')
+  const [zoneBusy, setZoneBusy] = useState(false)
+
+  // "Detectar mi zona": toma tu GPS y pone la zona que corresponde
+  // (Isla Mujeres, Cancún centro, Zona Hotelera…). Si no cae en
+  // ninguna conocida, te deja elegir de la lista.
+  function detectMyZone() {
+    setZoneMsg('')
+    if (!('geolocation' in navigator)) {
+      setZoneMsg('Este teléfono o navegador no tiene GPS disponible.')
+      return
+    }
+    setZoneBusy(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const z = detectZone(pos.coords.latitude, pos.coords.longitude)
+        if (z) {
+          setZone(z)
+          setZoneMsg(`📍 Estás en ${z}. Toca "Guardar perfil" para que quede guardada.`)
+        } else {
+          setZoneMsg('No pude ubicar tu zona con el GPS, elige una de la lista.')
+        }
+        setZoneBusy(false)
+      },
+      () => {
+        setZoneMsg('No se pudo tomar tu ubicación. Revisa el permiso de ubicación para este sitio.')
+        setZoneBusy(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
 
@@ -71,6 +103,12 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { us
           <Field label="Zona">
             <select className={selectCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select>
           </Field>
+          <div>
+            <Btn type="button" variant="teal" className="w-full" onClick={detectMyZone} disabled={zoneBusy}>
+              {zoneBusy ? 'Detectando tu zona…' : '📍 Detectar mi zona con GPS'}
+            </Btn>
+            {zoneMsg && <p className="mt-1 text-xs font-semibold text-teal-dark">{zoneMsg}</p>}
+          </div>
           <Field label="Bio"><input className={inputCls} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Cuéntanos cómo entrenas…" /></Field>
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={beginner} onChange={(e) => setBeginner(e.target.checked)} />

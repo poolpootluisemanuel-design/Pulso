@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Auth from './components/Auth'
 import Challenges from './components/Challenges'
 import Community from './components/Community'
@@ -9,8 +9,9 @@ import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
 import type { TrainActivity } from './components/Train'
-import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, syncOutbox } from './lib/store'
+import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
+import { detectZone } from './lib/utils'
 
 type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil'
 
@@ -80,6 +81,43 @@ export default function App() {
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Zona por GPS (Isla Mujeres, no "Cancún centro" fijo): la zona
+  // por defecto al crear cuenta era siempre "Cancún centro". Si el
+  // perfil todavía trae esa zona por defecto y el permiso de ubicación
+  // YA está concedido (Luis ya lo dio para el GPS), se detecta en
+  // silencio y se corrige. Si el permiso no está concedido, NO se
+  // pregunta al abrir (molestaría): se detecta desde Perfil con el
+  // botón "Detectar mi zona con GPS". Una sola vez por teléfono.
+  const zoneCheckedRef = useRef(false)
+  useEffect(() => {
+    if (!profile || profile.zone !== 'Cancún centro' || zoneCheckedRef.current) return
+    zoneCheckedRef.current = true
+    try {
+      if (localStorage.getItem('pulso_zone_auto') === '1') return
+      localStorage.setItem('pulso_zone_auto', '1')
+    } catch { return }
+    if (!('geolocation' in navigator)) return
+    const nav = navigator as Navigator & { permissions?: { query: (o: { name: string }) => Promise<{ state: string }> } }
+    const tryDetect = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const z = detectZone(pos.coords.latitude, pos.coords.longitude)
+          if (z && z !== profile.zone) {
+            const updated = { ...profile, zone: z }
+            void saveProfile(updated).then(() => setProfile(updated)).catch(() => undefined)
+          }
+        },
+        () => undefined,
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      )
+    }
+    // Solo si el permiso ya está concedido: sin prompt al abrir.
+    nav.permissions?.query({ name: 'geolocation' }).then(
+      (res) => { if (res.state === 'granted') tryDetect() },
+      () => undefined
+    ).catch(() => undefined)
+  }, [profile])
 
   // Seguridad extra: si la carga tarda más de 6 s, avisar en vez de
   // dejar la pantalla de carga fija.

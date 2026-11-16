@@ -47,6 +47,30 @@ export function paceMinKm(distanceKm: number, minutes: number): string {
   return `${m}:${String(s).padStart(2, '0')} min/km`
 }
 
+/** Zona por coordenadas GPS (cajas aproximadas, en ese orden: las
+ *  específicas primero, Riviera Maya al final como zona amplia).
+ *  Sirve para no dejar fijo "Cancún centro" cuando la persona está
+ *  en Isla Mujeres o en otro lado. Si no cae en ninguna, null y se
+ *  deja la zona que el usuario ya tenía elegida. */
+const ZONE_AREAS: { zone: string; latMin: number; latMax: number; lngMin: number; lngMax: number }[] = [
+  { zone: 'Isla Mujeres', latMin: 21.22, latMax: 21.29, lngMin: -86.75, lngMax: -86.68 },
+  { zone: 'Zona Hotelera', latMin: 21.08, latMax: 21.16, lngMin: -86.82, lngMax: -86.76 },
+  { zone: 'Puerto Cancún', latMin: 21.17, latMax: 21.2, lngMin: -86.82, lngMax: -86.79 },
+  { zone: 'Cancún centro', latMin: 21.13, latMax: 21.19, lngMin: -86.87, lngMax: -86.8 },
+  { zone: 'Puerto Morelos', latMin: 20.83, latMax: 20.88, lngMin: -86.92, lngMax: -86.86 },
+  { zone: 'Playa del Carmen', latMin: 20.6, latMax: 20.66, lngMin: -87.09, lngMax: -87.05 },
+  { zone: 'Tulum', latMin: 20.19, latMax: 20.24, lngMin: -87.45, lngMax: -87.4 },
+  { zone: 'Cozumel', latMin: 20.47, latMax: 20.55, lngMin: -86.97, lngMax: -86.9 },
+  { zone: 'Riviera Maya', latMin: 20.0, latMax: 21.1, lngMin: -87.6, lngMax: -86.8 },
+]
+
+export function detectZone(lat: number, lng: number): string | null {
+  for (const a of ZONE_AREAS) {
+    if (lat >= a.latMin && lat <= a.latMax && lng >= a.lngMin && lng <= a.lngMax) return a.zone
+  }
+  return null
+}
+
 /** Racha: días seguidos con al menos un entrenamiento, terminando hoy o ayer. */
 export function computeStreak(workouts: Workout[]): number {
   const days = new Set(workouts.map((w) => w.date))

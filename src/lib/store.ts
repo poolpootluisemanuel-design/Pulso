@@ -99,8 +99,15 @@ export async function syncOutbox(): Promise<number> {
         const { error } = await supabase.from('workouts').upsert({ ...rest, route: route || null }, { onConflict: 'id' })
         if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
       } else if (op.kind === 'session' && op.item) {
-        const { error } = await supabase.from('sessions').upsert(op.item as SessionItem, { onConflict: 'id' })
-        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+        const s = op.item as SessionItem
+        const { error } = await supabase.from('sessions').upsert(s, { onConflict: 'id' })
+        if (error && /lat|lng|column/i.test(error.message)) {
+          // La base aún no tiene las columnas lat/lng (falta correr el
+          // schema nuevo): se sube sin coordenadas, sin perder la sesión.
+          const { lat: _lat, lng: _lng, ...rest } = s
+          const { error: e2 } = await supabase.from('sessions').upsert(rest, { onConflict: 'id' })
+          if (e2 && !/duplicate|unique|conflict/i.test(e2.message)) throw e2
+        } else if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
       } else if (op.kind === 'post' && op.item) {
         const { error } = await supabase.from('posts').upsert(op.item as Post, { onConflict: 'id' })
         if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
@@ -150,7 +157,7 @@ function seedLocal(): void {
   }
   save('profiles', [ana, carlos])
   save('sessions', [
-    { id: 'demo-s1', title: 'Running matutino', sport: 'Running', level: 'todos', date: addDaysISO(2), time: '07:00', place: 'Malecón Tajamar', zone: 'Cancún centro', capacity: 8, host_id: 'demo-ana', host_name: 'Ana', notes: 'Ritmo suave, 5 km. Principiantes bienvenidos.' },
+    { id: 'demo-s1', title: 'Running matutino', sport: 'Running', level: 'todos', date: addDaysISO(2), time: '07:00', place: 'Malecón Tajamar', zone: 'Cancún centro', capacity: 8, host_id: 'demo-ana', host_name: 'Ana', notes: 'Ritmo suave, 5 km. Principiantes bienvenidos.', lat: 21.1486, lng: -86.8533 },
     { id: 'demo-s2', title: 'Pádel entre semana', sport: 'Pádel', level: 'intermedio', date: addDaysISO(4), time: '19:00', place: 'Cancha por confirmar', zone: 'Zona Hotelera', capacity: 4, host_id: 'demo-carlos', host_name: 'Carlos', notes: 'Llevar raqueta. Se arma reta.' },
   ] as SessionItem[])
   save('rsvps', [] as Rsvp[])
@@ -467,7 +474,16 @@ export async function listSessions(): Promise<SessionItem[]> {
     try {
       const { data, error } = await withTimeout(supabase.from('sessions').select('*').order('date').order('time'))
       if (error) throw new Error(error.message)
-      const list = (data || []).map((r) => ({ ...r, level: r.level as Level | 'todos' }) as SessionItem)
+      const list = (data || []).map((r) => {
+        const lat = (r as Record<string, unknown>).lat
+        const lng = (r as Record<string, unknown>).lng
+        return {
+          ...r,
+          level: r.level as Level | 'todos',
+          ...(typeof lat === 'number' ? { lat } : lat ? { lat: Number(lat) } : {}),
+          ...(typeof lng === 'number' ? { lng } : lng ? { lng: Number(lng) } : {}),
+        } as SessionItem
+      })
       cacheSet('sessions', list)
       return list
     } catch (e) {
@@ -485,11 +501,25 @@ export async function createSession(s: Omit<SessionItem, 'id'>): Promise<Session
       const { error } = await withTimeout(supabase.from('sessions').insert(item))
       if (error) throw new Error(error.message)
     } catch (e) {
-      if (!isNetworkError(e)) throw e
-      const list = cacheGet<SessionItem[]>('sessions', load<SessionItem[]>('sessions', []))
-      list.push(item)
-      cacheSet('sessions', list)
-      queueOffline({ kind: 'session', item })
+      if (isNetworkError(e)) {
+        const list = cacheGet<SessionItem[]>('sessions', load<SessionItem[]>('sessions', []))
+        list.push(item)
+        cacheSet('sessions', list)
+        queueOffline({ kind: 'session', item })
+      } else if (e instanceof Error && /lat|lng|column/i.test(e.message)) {
+        // La base aún no tiene las columnas lat/lng (falta correr el
+        // schema nuevo en Supabase): la sesión se crea sin coordenadas
+        // en la nube, pero se guardan en el teléfono para que salga en
+        // el mapa local hasta que se corra el esquema.
+        const { lat: _lat, lng: _lng, ...rest } = item
+        const { error } = await supabase.from('sessions').insert(rest as SessionItem)
+        if (error) throw new Error(error.message)
+        const list = cacheGet<SessionItem[]>('sessions', load<SessionItem[]>('sessions', []))
+        const i = list.findIndex((x) => x.id === item.id)
+        if (i >= 0) list[i] = item
+        else list.push(item)
+        cacheSet('sessions', list)
+      } else throw e
     }
     return item
   }

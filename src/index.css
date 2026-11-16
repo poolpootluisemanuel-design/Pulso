@@ -5,6 +5,12 @@
 body { background: #f0f4f9; color: #0a1b2e; }
 input, select, textarea { font-size: 16px; }
 
+/* El mapa de Leaflet vive dentro de su propio contenedor: sus controles
+   no deben tapar el encabezado ni la navegación de la app. */
+.pulso-map { position: relative; z-index: 0; }
+.pulso-map .leaflet-container { font-family: inherit; background: #e6edf5; }
+.pulso-map .leaflet-control-attribution { font-size: 10px; }
+
 @keyframes pulso-line {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(220%); }

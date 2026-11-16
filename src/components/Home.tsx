@@ -28,7 +28,7 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
       {/* Saludo con avatar, como la app de Muse */}
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wider text-pulso">Cancún · {profile.zone}</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-pulso">{profile.zone}</p>
           <h2 className="truncate text-2xl font-black text-night">Hola, {profile.name} 👋</h2>
         </div>
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-xl font-black text-white shadow-lg shadow-pulso/30">

@@ -41,8 +41,14 @@ create table if not exists sessions (
   host_id uuid not null references profiles(id) on delete cascade,
   host_name text not null,
   notes text,
+  lat numeric, -- ubicación opcional del lugar (mapa de sesiones)
+  lng numeric,
   created_at timestamptz not null default now()
 );
+-- Para bases ya creadas (las columnas no existían antes): se agregan
+-- sin borrar nada. Vuelve a correr este archivo en el SQL Editor.
+alter table sessions add column if not exists lat numeric;
+alter table sessions add column if not exists lng numeric;
 
 -- Confirmaciones y lista de espera.
 create table if not exists rsvps (
