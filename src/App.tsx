@@ -143,7 +143,11 @@ export default function App() {
         </div>
       )}
 
-      <main className="mx-auto max-w-2xl px-4 pb-32 pt-4">
+      {/* Espacio reservado abajo (pb-56): el contenedor fijo de
+          GPS + música mide ~200 px en su punto más alto, así que el
+          contenido nunca queda tapado ni salta cuando aparece o se va
+          la barrita de GPS. */}
+      <main className="mx-auto max-w-2xl px-4 pb-56 pt-4">
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
         {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} />}
@@ -152,21 +156,38 @@ export default function App() {
             que se estaba grabando y la música. Así el cronómetro, la ruta
             y el reproductor siguen vivos en cualquier pestaña. */}
         <div className={tab === 'entrenar' ? '' : 'hidden'}>
-          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => document.getElementById('pulso-music')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })} />
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
         {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
       </main>
 
-      {/* Reproductor de música PERSISTENTE: una sola instancia, siempre
-          montada en App, nunca dentro de una pestaña que se oculte con
-          display:none (eso pausa el iframe de YouTube). En Entrenar se
-          ve la tarjeta completa; en las demás pestañas, la mini-barra
-          fija con el video chiquito pero visible, y el audio sigue.
-          El envoltorio es UNO SOLO y solo cambia de clase, para que
-          React no desmonte el reproductor al cambiar de pestaña. */}
-      <div id="pulso-music" className={tab === 'entrenar' ? 'mx-auto max-w-2xl px-4 pb-4' : 'fixed bottom-[64px] left-0 right-0 z-20 px-3'}>
+      {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
+          fijo, siempre en el mismo sitio (encima de la navegación),
+          nunca dentro de una pestaña ni en el flujo de Entrenar. Antes
+          el reproductor pasaba de estar en el flujo (Entrenar) a fijo
+          (las demás pestañas), y la barrita GPS y el botón + tenían
+          cada uno su propio `bottom` calculado, así que todo saltaba
+          al cambiar de pestaña o al empezar/pausar el GPS. Ahora el
+          orden es fijo (GPS arriba, música abajo), el contenedor no
+          se mueve y el espacio está reservado con pb-56 en <main>.
+          En Entrenar el reproductor se expande en ese mismo lugar
+          (hoja con scroll); en las demás pestañas se recoge a
+          mini-barra, sin cambiar de padre ni desmontarse. */}
+      <div id="pulso-music" className="fixed bottom-[64px] left-0 right-0 z-20 mx-auto max-w-2xl px-3">
+        {tab !== 'entrenar' && activity.gps?.active && (
+          <button
+            onClick={() => setTab('entrenar')}
+            className="mb-2 flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"
+          >
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-pulso" />
+              {activity.gps.status === 'paused' ? '⏸ Pausado' : '● Grabando'} {String(Math.floor(activity.gps.seconds / 60)).padStart(2, '0')}:{String(activity.gps.seconds % 60).padStart(2, '0')} · {activity.gps.distanceKm.toFixed(2)} km
+            </span>
+            <span className="ml-auto shrink-0 text-teal">Volver →</span>
+          </button>
+        )}
         <MusicPlayer
           profileId={profile.id}
           compact={tab !== 'entrenar'}
@@ -175,30 +196,18 @@ export default function App() {
         />
       </div>
 
-      {/* Barrita de GPS: solo GPS (la música ya tiene su mini-barra).
-          Va arriba de la mini-barra de música cuando hay grabación. */}
-      {tab !== 'entrenar' && activity.gps?.active && (
-        <button
-          onClick={() => setTab('entrenar')}
-          className="fixed bottom-[140px] left-0 right-0 z-20 mx-auto flex max-w-2xl items-center justify-between gap-2 px-4"
-        >
-          <span className="flex flex-1 items-center gap-2 rounded-full bg-night px-4 py-2.5 text-sm font-bold text-white shadow-xl shadow-night/40">
-            {activity.gps?.active && (
-              <span className="flex items-center gap-1.5">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-pulso" />
-                {activity.gps.status === 'paused' ? '⏸ Pausado' : '● Grabando'} {String(Math.floor(activity.gps.seconds / 60)).padStart(2, '0')}:{String(activity.gps.seconds % 60).padStart(2, '0')} · {activity.gps.distanceKm.toFixed(2)} km
-              </span>
-            )}
-            <span className="ml-auto shrink-0 text-teal">Volver →</span>
-          </span>
+      {/* Botón flotante para crear sesión. Se esconde en Entrenar,
+          donde la hoja de música expandida ocuparía ese hueco, y en
+          las demás pestañas va siempre encima del contenedor fijo
+          (navegación 64 + mini-barra ~80 + margen): con GPS activo
+          la barrita añade 52 px. Solo hay dos posiciones fijas, no
+          salta al cambiar de pestaña. */}
+      {tab !== 'entrenar' && (
+        <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
+          className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'bottom-[208px]' : 'bottom-[156px]'}`}>
+          +
         </button>
       )}
-
-      {/* Botón flotante para crear sesión (sube cuando hay barras fijas). */}
-      <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
-        className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${tab === 'entrenar' ? 'bottom-20' : activity.gps?.active ? 'bottom-48' : 'bottom-40'}`}>
-        +
-      </button>
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex max-w-2xl">

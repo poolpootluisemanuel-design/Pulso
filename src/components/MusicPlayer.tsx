@@ -57,11 +57,13 @@ export function parseYouTubeUrl(url: string): { kind: 'playlist' | 'video'; id: 
 
 // Embed de respaldo (solo si la API de YouTube no carga): youtube.com,
 // video real, NUNCA listType=search en youtube-nocookie (ese no suena).
-function embedSrc(preset: Preset, custom: { kind: 'playlist' | 'video'; id: string } | null, playing: boolean): string {
-  const autoplay = playing ? '&autoplay=1' : ''
-  if (custom?.kind === 'playlist') return `https://www.youtube.com/embed/videoseries?list=${custom.id}&rel=0${autoplay}`
-  if (custom?.kind === 'video') return `https://www.youtube.com/embed/${custom.id}?rel=0${autoplay}`
-  return `https://www.youtube.com/embed/${preset.videoId}?rel=0${autoplay}`
+// Src FIJA por video: antes incluía `playing` (autoplay) y la key del
+// iframe también, así que cada toque de Reproducir/Pausa recreaba el
+// iframe y el video volvía a empezar desde 0.
+function embedSrc(preset: Preset, custom: { kind: 'playlist' | 'video'; id: string } | null): string {
+  if (custom?.kind === 'playlist') return `https://www.youtube.com/embed/videoseries?list=${custom.id}&rel=0`
+  if (custom?.kind === 'video') return `https://www.youtube.com/embed/${custom.id}?rel=0`
+  return `https://www.youtube.com/embed/${preset.videoId}?rel=0`
 }
 
 // Link normal de YouTube para abrir en la app / pestaña de YouTube.
@@ -91,7 +93,7 @@ export interface MusicStatus { playing: boolean; title: string; source: 'youtube
 
 declare global {
   interface Window {
-    YT?: { Player: new (el: HTMLElement, opts: Record<string, unknown>) => unknown; PlayerState?: { PLAYING: number; PAUSED: number; ENDED: number } }
+    YT?: { Player: new (el: HTMLElement, opts: Record<string, unknown>) => unknown; PlayerState?: { PLAYING: number; PAUSED: number; ENDED: number; CUED: number; BUFFERING: number } }
     onYouTubeIframeAPIReady?: () => void
   }
 }
@@ -132,6 +134,18 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   // compacto solo se hace chiquito, pero sigue visible y sonando.
   const playerDivRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YTPlayer | null>(null)
+  // Último estado REAL del reproductor de YouTube (-1 = sin empezar).
+  // Es la única fuente para decidir si hay que ordenar play/pausa.
+  const ytStateRef = useRef<number>(-1)
+  // Espejos de `playing` / `localPlaying` para leerlos dentro de
+  // efectos y callbacks sin que el closure quede desfasado.
+  const playingRef = useRef(false)
+  const localPlayingRef = useRef(false)
+  useEffect(() => { playingRef.current = playing }, [playing])
+  useEffect(() => { localPlayingRef.current = localPlaying }, [localPlaying])
+  // Qué video/playlist ya está cargado en el reproductor: el cue solo
+  // se hace cuando cambia, nunca al volver de otra pestaña o de local.
+  const lastCuedRef = useRef<string | null>(null)
   const [ytReady, setYtReady] = useState(false)
   const [ytPlayerReady, setYtPlayerReady] = useState(false)
   const [ytFailed, setYtFailed] = useState(false)
@@ -181,8 +195,15 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
           onStateChange: (e: { data: number }) => {
             const st = window.YT?.PlayerState
             if (!st) return
+            ytStateRef.current = e.data
+            // BUFFERING (3): no tocar `playing`, el video sigue en el
+            // mismo punto y solo está cargando. CUED (5) y UNSTARTED
+            // (-1): el video está parado en 0, así que el botón debe
+            // decir Reproducir, no Pausa. Antes cualquier estado
+            // distinto de PLAYING que no fuera PAUSED/ENDED dejaba el
+            // botón desfasado del audio real.
             if (e.data === st.PLAYING) setPlaying(true)
-            else if (e.data === st.PAUSED || e.data === st.ENDED) setPlaying(false)
+            else if (e.data === st.PAUSED || e.data === st.ENDED || e.data === st.CUED || e.data === -1) setPlaying(false)
           },
           onError: (e: { data: number }) => {
             setPlaying(false)
@@ -204,14 +225,25 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   }, [ytReady, ytFailed])
 
   // Cargar el video/playlist que toca (preset o link del usuario).
+  // SOLO cuando cambia el video: antes se hacía cueVideoById cada vez
+  // que cambiaba la fuente o se re-activaba el reproductor, y el video
+  // volvía a empezar desde 0 al volver de música local o de otra
+  // pestaña. `lastCuedRef` recuerda qué video ya está cargado.
   useEffect(() => {
     if (!ytPlayerReady || !playerRef.current || source !== 'youtube') return
+    const target = custom?.kind === 'playlist' ? `playlist:${custom.id}` : custom?.kind === 'video' ? `video:${custom.id}` : `video:${preset.videoId}`
+    if (lastCuedRef.current === target) return
+    lastCuedRef.current = target
     setYtError('')
+    const wasPlaying = playingRef.current
     try {
       if (custom?.kind === 'playlist') playerRef.current.cuePlaylist({ list: custom.id })
       else if (custom?.kind === 'video') playerRef.current.cueVideoById(custom.id)
       else playerRef.current.cueVideoById(preset.videoId)
-      if (playing) playerRef.current.playVideo()
+      // cue deja el video en pausa en 0: sincronizar el botón.
+      ytStateRef.current = window.YT?.PlayerState?.CUED ?? 5
+      setPlaying(false)
+      if (wasPlaying) playerRef.current.playVideo()
     } catch {
       setYtFailed(true)
     }
@@ -219,11 +251,16 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   }, [ytPlayerReady, preset.id, custom?.kind, custom?.id, source])
 
   // Play / pausa de YouTube (la API lo controla, sin recargar el iframe).
+  // Solo se ordena cuando el estado deseado difiere del estado real del
+  // reproductor: antes cada cambio de `playing` —incluidos los que venían
+  // del propio onStateChange— volvía a llamar a playVideo/pauseVideo.
   useEffect(() => {
     if (!ytPlayerReady || !playerRef.current || source !== 'youtube') return
+    const st = window.YT?.PlayerState
+    if (!st) return
     try {
-      if (playing) playerRef.current.playVideo()
-      else playerRef.current.pauseVideo()
+      if (playing && ytStateRef.current !== st.PLAYING) playerRef.current.playVideo()
+      else if (!playing && ytStateRef.current === st.PLAYING) playerRef.current.pauseVideo()
     } catch { /* noop */ }
   }, [playing, ytPlayerReady, source])
 
@@ -365,11 +402,17 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   // render; al pasar a playing se reproduce en el efecto de abajo.
   // El <audio> vive siempre montado (fuera de los condicionales) para
   // que no se corte al cambiar de pestaña o de modo.
+  // Si el audio aún no cargó el nuevo src (readyState < 2), NO se llama
+  // a play(): antes su rechazo ponía localPlaying=false aunque el
+  // usuario había dado a Reproducir, y el botón quedaba desfasado. En
+  // ese caso arranca solo al dispararse onCanPlay.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || source !== 'local') return
-    if (localPlaying && currentLocal) void audio.play().catch(() => setLocalPlaying(false))
-    else audio.pause()
+    if (localPlaying && currentLocal) {
+      if (audio.readyState >= 2 && !audio.paused) return
+      if (audio.readyState >= 2) void audio.play().catch(() => undefined)
+    } else audio.pause()
   }, [localPlaying, localIndex, source, currentLocal])
 
   function switchSource(next: 'youtube' | 'local') {
@@ -383,13 +426,20 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
     else setPlaying(!playing)
   }
 
-  // Div del reproductor de YouTube: siempre el mismo nodo, siempre
-  // montado; en compacto se hace chiquito, en la tarjeta se ve grande.
+  // Div del reproductor de YouTube: UN SOLO nodo, siempre el mismo,
+  // siempre montado como primer hijo de la raíz. Antes se renderizaba
+  // DOS veces en la tarjeta completa (una como primer hijo y otra dentro
+  // de la sección de YouTube): el ref quedaba en la segunda instancia,
+  // así que al pasar a mini-barra esa instancia se desmontaba, el
+  // YT.Player quedaba huérfano y el video "se movía" y dejaba de
+  // responder. Ahora hay una sola instancia y nunca cambia de padre.
+  // En la tarjeta completa el video queda fijo arriba (sticky) aunque
+  // se baje por la lista de controles.
   const ytPlayer = ytFailed ? (
     <iframe
-      key={`${useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}-${playing ? 'play' : 'pause'}`}
-      className={compact ? 'h-16 w-28 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'aspect-video w-full'}
-      src={embedSrc(preset, custom, playing)}
+      key={useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}
+      className={compact ? 'h-16 w-28 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'sticky top-0 z-10 aspect-video w-full bg-slate-900'}
+      src={embedSrc(preset, custom)}
       title={useCustom ? pref.customLabel : `YouTube: ${preset.label}`}
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
       allowFullScreen
@@ -400,7 +450,7 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
       className={compact
         ? 'h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-slate-900'
         : source === 'local' ? 'hidden'
-        : 'aspect-video w-full overflow-hidden rounded-xl bg-slate-900'}
+        : 'sticky top-0 z-10 aspect-video w-full overflow-hidden rounded-xl bg-slate-900'}
     />
   )
 
@@ -408,10 +458,14 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
   // pasar de tarjeta completa a mini-barra (y al revés) React conserva
   // el mismo nodo DOM y el reproductor NO se recarga ni se corta.
   // (Dos árboles distintos con early-return lo desmontarían.)
+  // En modo completo la raíz es una hoja con scroll (max-h) anclada
+  // abajo, no un bloque en el flujo: así el reproductor no cambia de
+  // sitio al cambiar de pestaña, solo se expande o se recoge en el
+  // mismo lugar fijo.
   return (
     <div className={compact
       ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
-      : 'rounded-3xl border border-slate-100 bg-white p-4 shadow-md shadow-night/5'}>
+      : 'max-h-[62vh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white p-4 shadow-xl shadow-night/20'}>
       {ytPlayer}
       {compact ? (
         <>
@@ -482,7 +536,10 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
                 ))}
               </div>
 
-              {ytPlayer}
+              {/* El video ya está arriba como primer hijo de la raíz
+                  (una sola instancia): NO se vuelve a renderizar aquí.
+                  Antes aparecía dos veces y el ref quedaba en esta
+                  segunda copia, que se desmontaba al pasar a mini-barra. */}
               {ytError && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{ytError}</p>}
 
               <div className="flex items-center gap-2">
@@ -597,6 +654,7 @@ export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoT
         controls
         preload="metadata"
         src={currentLocal ? currentLocal.url : undefined}
+        onCanPlay={() => { if (localPlayingRef.current && audioRef.current?.paused) void audioRef.current.play().catch(() => undefined) }}
         onPlay={() => setLocalPlaying(true)}
         onPause={() => setLocalPlaying(false)}
         onEnded={() => { if (localTracks.length > 1) playLocal((localIndex + 1) % localTracks.length) }}
