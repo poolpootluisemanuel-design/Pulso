@@ -59,9 +59,10 @@ export default function Auth({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-night-50 pb-8">
-      {/* Hero visual, como la app de Muse: foto + degradado azul noche → rojo */}
-      <div className="relative overflow-hidden">
-        <img src={HERO_IMG} alt="Entrenando al amanecer en Cancún" className="h-72 w-full object-cover" />
+      {/* Hero visual, como la app de Muse: foto + degradado azul noche → rojo.
+          Sin internet la foto no carga y queda el degradado (nunca en blanco). */}
+      <div className="relative overflow-hidden bg-gradient-to-b from-night via-night to-pulso-dark">
+        <img src={HERO_IMG} alt="Entrenando al amanecer en Cancún" className="h-72 w-full object-cover" onError={(e) => { e.currentTarget.style.opacity = '0' }} />
         <div className="absolute inset-0 bg-gradient-to-b from-night/70 via-night/35 to-night" />
         <div className="absolute inset-x-0 bottom-0 p-5 text-white">
           <div className="flex items-center gap-3">

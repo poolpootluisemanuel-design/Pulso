@@ -9,7 +9,7 @@ import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
 import type { TrainActivity } from './components/Train'
-import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode } from './lib/store'
+import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
 
 type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil'
@@ -42,6 +42,11 @@ export default function App() {
   // Actividad en curso de Entrenar (GPS / música): para la barrita que
   // aparece al cambiar de pestaña y vuelve a Entrenar al tocarla.
   const [activity, setActivity] = useState<TrainActivity>({ gps: null, music: null })
+  // Modo offline: sin internet la app entra con los datos guardados en
+  // el teléfono, nunca se queda en blanco ni en "Cargando" para siempre.
+  const [online, setOnline] = useState(() => navigator.onLine)
+  const [pending, setPending] = useState(0)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   // La app ya se instala desde Chrome (íconos PWA subidos): Luis pidió
   // quitar la leyenda de cómo instalar y el banner propio, así que no
@@ -49,20 +54,55 @@ export default function App() {
   // cuando toca, sin leyenda nuestra.
 
   const loadAll = useCallback(async () => {
-    const me = await getCurrentUser()
-    setUser(me)
-    if (!me) { setLoading(false); return }
-    const prof = await getProfile(me.id)
-    setProfile(prof)
-    const [ps, ss, ch, po, bu] = await Promise.all([
-      listProfiles(), listSessions(), listChallenges(), listPosts(), listBusinesses(),
-    ])
-    setProfiles(ps); setSessions(ss); setChallenges(ch); setPosts(po); setBusinesses(bu)
-    setWorkouts(await listWorkouts(me.id))
-    setLoading(false)
+    try {
+      const me = await getCurrentUser()
+      setUser(me)
+      if (!me) { setLoading(false); return }
+      const prof = await getProfile(me.id)
+      setProfile(prof)
+      // Cada lectura tiene timeout de 5 s en store.ts y usa el espejo
+      // local si Supabase no responde: sin internet entra igual.
+      const [ps, ss, ch, po, bu] = await Promise.all([
+        listProfiles(), listSessions(), listChallenges(), listPosts(), listBusinesses(),
+      ])
+      setProfiles(ps); setSessions(ss); setChallenges(ch); setPosts(po); setBusinesses(bu)
+      setWorkouts(await listWorkouts(me.id))
+      // Si algo se hizo sin internet, se sube ahora que hay red.
+      if (navigator.onLine) setPending(await syncOutbox())
+      else setPending(pendingSyncCount())
+    } catch {
+      // Nunca quedarse en "Cargando" para siempre: si algo falló, se
+      // muestra lo que haya (sesión local / espejo) o la pantalla de acceso.
+      setPending(pendingSyncCount())
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Seguridad extra: si la carga tarda más de 6 s, avisar en vez de
+  // dejar la pantalla de carga fija.
+  useEffect(() => {
+    if (!loading) return
+    const t = setTimeout(() => setSlowLoad(true), 6000)
+    return () => clearTimeout(t)
+  }, [loading])
+
+  // Al volver internet: subir lo hecho offline y recargar.
+  useEffect(() => {
+    const goOnline = () => {
+      setOnline(true)
+      void syncOutbox().then((n) => { setPending(n); loadAll() })
+    }
+    const goOffline = () => { setOnline(false); setPending(pendingSyncCount()) }
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
+  }, [loadAll])
 
   if (loading) {
     return (
@@ -70,6 +110,7 @@ export default function App() {
         <div className="text-center">
           <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-pulso text-3xl font-black text-white">P</div>
           <p className="text-lg font-black text-white">Cargando PULSO…</p>
+          {slowLoad && <p className="mt-2 px-6 text-sm text-white/70">Tardando… si no tienes internet, la app entra en modo offline con tus datos guardados.</p>}
         </div>
       </div>
     )
@@ -97,7 +138,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90 sm:block">
-              {mode === 'supabase' ? '● En línea' : '● Modo local'}
+              {!online ? '● Sin internet' : mode === 'supabase' ? '● En línea' : '● Modo local'}
             </span>
             <button onClick={() => setTab('comunidad')} aria-label="Notificaciones y comunidad"
               className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-lg">
@@ -111,6 +152,24 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Aviso offline: la app sigue funcionando con lo guardado en el
+          teléfono. GPS y música local no necesitan internet; YouTube sí. */}
+      {!online && (
+        <div className="mx-auto mt-3 max-w-2xl px-4">
+          <p className="rounded-3xl bg-amber-100 p-3 text-center text-sm font-semibold text-amber-900 shadow-md">
+            📶 Sin internet — modo offline. Puedes entrenar con GPS y música local; todo se guarda en el teléfono
+            {pending > 0 ? ` y se sube cuando vuelva internet (${pending} por subir).` : ' y se sube cuando vuelva internet.'}
+          </p>
+        </div>
+      )}
+      {online && pending > 0 && (
+        <div className="mx-auto mt-3 max-w-2xl px-4">
+          <p className="rounded-3xl bg-teal/10 p-3 text-center text-sm font-semibold text-teal-dark shadow-md">
+            ⏫ Sincronizando tus entrenamientos guardados sin internet ({pending} por subir)…
+          </p>
+        </div>
+      )}
 
       <main className="mx-auto max-w-2xl px-4 pb-40 pt-4">
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}

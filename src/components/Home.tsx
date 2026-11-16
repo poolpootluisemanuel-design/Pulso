@@ -36,9 +36,10 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         </div>
       </div>
 
-      {/* Hero con foto de la próxima sesión */}
-      <div className="relative overflow-hidden rounded-3xl shadow-lg shadow-night/20">
-        <img src={HERO_IMG} alt="Deporte en equipo" className="h-48 w-full object-cover" />
+      {/* Hero con foto de la próxima sesión. Sin internet la foto no carga
+          y queda el degradado azul noche (nunca en blanco). */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-night to-pulso-dark shadow-lg shadow-night/20">
+        <img src={HERO_IMG} alt="Deporte en equipo" className="h-48 w-full object-cover" onError={(e) => { e.currentTarget.style.opacity = '0' }} />
         <div className="absolute inset-0 bg-gradient-to-t from-night via-night/45 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-4 text-white">
           <span className="rounded-full bg-pulso px-3 py-1 text-xs font-black uppercase tracking-wider">

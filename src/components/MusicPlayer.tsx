@@ -135,6 +135,15 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
 
   // Reproductor local opcional.
   const [source, setSource] = useState<'youtube' | 'local'>('youtube')
+  // Sin internet YouTube no suena: se avisa y se ofrece la música local.
+  const [online, setOnline] = useState(() => navigator.onLine)
+  useEffect(() => {
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
   const [localTracks, setLocalTracks] = useState<LocalTrack[]>([])
   const [localIndex, setLocalIndex] = useState(0)
   const [localPlaying, setLocalPlaying] = useState(false)
@@ -541,6 +550,11 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
 
           {source === 'youtube' ? (
             <>
+              {!online && (
+                <p className="rounded-xl bg-amber-50 p-2 text-sm font-semibold text-amber-800">
+                  📶 Sin internet: YouTube no suena. Cambia a 📱 Música local, que sí funciona sin datos.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {MUSIC_PRESETS.map((p) => (
                   <button

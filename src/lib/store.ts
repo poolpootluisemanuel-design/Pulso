@@ -33,6 +33,107 @@ function save(key: string, value: unknown): void {
   localStorage.setItem(LS + key, JSON.stringify(value))
 }
 
+// ---------- Modo offline ----------
+// Sin internet la app NO debe quedarse en blanco ni en "Cargando" para
+// siempre. Estrategia:
+// - Cada lectura de Supabase tiene timeout de 5 s: si no responde, se
+//   usa la copia guardada en el teléfono (espejo local).
+// - Cada escritura que falla por falta de red se guarda en el teléfono
+//   y se encola en `outbox` para subirla a Supabase cuando vuelva
+//   internet (con el mismo id, así no se duplica).
+// - YouTube sin internet no suena (eso no tiene arreglo); la música
+//   local del teléfono sí, y el GPS tampoco necesita internet.
+function withTimeout<T>(p: PromiseLike<T>, ms = 5000): Promise<T> {
+  return Promise.race([
+    Promise.resolve(p),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ])
+}
+function isNetworkError(e: unknown): boolean {
+  const m = (e instanceof Error ? e.message : String(e)).toLowerCase()
+  return (
+    m.includes('timeout') || m.includes('failed to fetch') || m.includes('networkerror') ||
+    m.includes('network request failed') || m.includes('load failed') || m.includes('offline')
+  )
+}
+function cacheSet(key: string, value: unknown): void {
+  try { localStorage.setItem(LS + 'cache_' + key, JSON.stringify(value)) } catch { /* sin espacio: se sigue sin espejo */ }
+}
+function cacheGet<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(LS + 'cache_' + key)
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch { return fallback }
+}
+
+export interface OutboxOp { kind: 'workout' | 'session' | 'post' | 'rsvp' | 'profile' | 'plan' | 'delete-workout'; item?: unknown; id?: string }
+function loadOutbox(): OutboxOp[] {
+  try { return JSON.parse(localStorage.getItem(LS + 'outbox') || '[]') as OutboxOp[] } catch { return [] }
+}
+function saveOutbox(ops: OutboxOp[]): void {
+  try { localStorage.setItem(LS + 'outbox', JSON.stringify(ops)) } catch { /* noop */ }
+}
+export function pendingSyncCount(): number { return loadOutbox().length }
+function queueOffline(op: OutboxOp): void {
+  const ops = loadOutbox()
+  // Sin duplicar: si ya hay una operación con el mismo id, se reemplaza.
+  const key = (op.item as { id?: string } | undefined)?.id || op.id
+  const filtered = key ? ops.filter((o) => ((o.item as { id?: string } | undefined)?.id || o.id) !== key) : ops
+  filtered.push(op)
+  saveOutbox(filtered)
+}
+
+// Sube a Supabase lo que se hizo sin internet. Se llama al volver la
+// red y después de cada carga exitosa. Devuelve cuántos quedaron por subir.
+export async function syncOutbox(): Promise<number> {
+  if (!supabaseConfigured || !supabase) return 0
+  if (!navigator.onLine) return loadOutbox().length
+  const ops = loadOutbox()
+  if (!ops.length) return 0
+  const remaining: OutboxOp[] = []
+  for (const op of ops) {
+    try {
+      if (op.kind === 'workout' && op.item) {
+        const item = op.item as Workout
+        const { route, ...rest } = item
+        const { error } = await supabase.from('workouts').upsert({ ...rest, route: route || null }, { onConflict: 'id' })
+        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+      } else if (op.kind === 'session' && op.item) {
+        const { error } = await supabase.from('sessions').upsert(op.item as SessionItem, { onConflict: 'id' })
+        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+      } else if (op.kind === 'post' && op.item) {
+        const { error } = await supabase.from('posts').upsert(op.item as Post, { onConflict: 'id' })
+        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+      } else if (op.kind === 'rsvp' && op.item) {
+        const { error } = await supabase.from('rsvps').upsert(op.item as Rsvp, { onConflict: 'id' })
+        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+      } else if (op.kind === 'profile' && op.item) {
+        const p = op.item as Profile
+        const { error } = await supabase.from('profiles').upsert({
+          id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
+          beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
+        }, { onConflict: 'id' })
+        if (error) throw error
+      } else if (op.kind === 'plan' && op.item) {
+        const pl = op.item as TrainingPlan
+        const { error } = await supabase.from('training_plans').upsert({
+          id: pl.id, profile_id: pl.profile_id, sport: pl.sport, level: pl.level, goal: pl.goal,
+          days_per_week: pl.days_per_week, minutes_per_session: pl.minutes_per_session,
+          adjustment: pl.adjustment, week_goal_km: pl.week_goal_km || null, tasks: pl.tasks,
+        }, { onConflict: 'id' })
+        if (error) throw error
+      } else if (op.kind === 'delete-workout' && op.id) {
+        await supabase.from('workouts').delete().eq('id', op.id)
+      }
+    } catch {
+      // Sigue sin red o error real: se queda en la cola para el próximo intento.
+      remaining.push(op)
+    }
+  }
+  saveOutbox(remaining)
+  return remaining.length
+}
+
 function seedLocal(): void {
   if (localStorage.getItem(LS + 'seeded')) return
   const ana: Profile = {
@@ -91,16 +192,32 @@ function getSessionId(): string | null {
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
   if (supabaseConfigured && supabase) {
-    const { data } = await supabase.auth.getUser()
-    if (!data.user) return null
-    const { data: prof } = await supabase.from('profiles').select('name').eq('id', data.user.id).maybeSingle()
-    if (!prof) {
-      // Cuenta de Auth existe pero sin fila en profiles (p. ej. creada
-      // antes del arreglo de RLS): se crea el perfil sola al entrar.
-      await ensureSupabaseProfile(data.user.id, data.user.email || '', (data.user.user_metadata?.name as string) || '')
+    // getSession() lee la sesión guardada en el teléfono (sin red):
+    // getUser() va a la red y sin internet se quedaba colgado. Con la
+    // sesión local se entra offline; el perfil se saca del espejo local
+    // si Supabase no responde en 5 s.
+    let sessionUser: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null = null
+    try {
+      const { data } = await withTimeout(supabase.auth.getSession())
+      sessionUser = data.session?.user ?? null
+    } catch { sessionUser = null }
+    if (!sessionUser) return null
+    const cached = cacheGet<Profile | null>('profile_' + sessionUser.id, null)
+    try {
+      const { data: prof } = await withTimeout(
+        supabase.from('profiles').select('name').eq('id', sessionUser.id).maybeSingle()
+      )
+      if (!prof) {
+        await ensureSupabaseProfile(sessionUser.id, sessionUser.email || '', (sessionUser.user_metadata?.name as string) || '')
+      } else {
+        cacheSet('profile_' + sessionUser.id, { id: sessionUser.id, name: prof.name as string, email: sessionUser.email || '' })
+      }
+      const name = (prof?.name as string) || (sessionUser.user_metadata?.name as string) || cached?.name || 'Sin nombre'
+      return { id: sessionUser.id, email: sessionUser.email || '', name }
+    } catch {
+      // Sin internet: entra con la sesión y el perfil guardados.
+      return { id: sessionUser.id, email: sessionUser.email || '', name: cached?.name || (sessionUser.user_metadata?.name as string) || 'Sin nombre' }
     }
-    const name = (prof?.name as string) || (data.user.user_metadata?.name as string) || 'Sin nombre'
-    return { id: data.user.id, email: data.user.email || '', name }
   }
   const id = getSessionId()
   if (!id) return null
@@ -274,20 +391,37 @@ export async function signOut(): Promise<void> {
 // ---------- Perfiles ----------
 export async function getProfile(id: string): Promise<Profile | null> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle()
-    if (error || !data) return null
-    return rowToProfile(data)
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from('profiles').select('*').eq('id', id).maybeSingle()
+      )
+      if (error || !data) return cacheGet<Profile | null>('profile_' + id, null)
+      const prof = rowToProfile(data)
+      cacheSet('profile_' + id, prof)
+      return prof
+    } catch {
+      return cacheGet<Profile | null>('profile_' + id, null)
+    }
   }
   return load<Profile[]>('profiles', []).find((p) => p.id === id) || null
 }
 
 export async function saveProfile(p: Profile): Promise<void> {
   if (supabaseConfigured && supabase) {
-    const { error } = await supabase.from('profiles').upsert({
-      id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
-      beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
-    })
-    if (error) throw new Error(error.message)
+    try {
+      const { error } = await withTimeout(supabase.from('profiles').upsert({
+        id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
+        beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
+      }))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      // Sin internet: se guarda en el teléfono y se sube luego.
+      cacheSet('profile_' + p.id, p)
+      queueOffline({ kind: 'profile', item: p })
+      return
+    }
+    cacheSet('profile_' + p.id, p)
     // Espejo en profile_sports para consultas por deporte (si la tabla existe).
     await supabase.from('profile_sports').delete().eq('profile_id', p.id)
     if (p.sports.length) {
@@ -304,9 +438,16 @@ export async function saveProfile(p: Profile): Promise<void> {
 
 export async function listProfiles(): Promise<Profile[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('profiles').select('*').order('name')
-    if (error) throw new Error(error.message)
-    return (data || []).map(rowToProfile)
+    try {
+      const { data, error } = await withTimeout(supabase.from('profiles').select('*').order('name'))
+      if (error) throw new Error(error.message)
+      const list = (data || []).map(rowToProfile)
+      cacheSet('profiles', list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<Profile[]>('profiles', load<Profile[]>('profiles', []))
+      throw e
+    }
   }
   return load<Profile[]>('profiles', [])
 }
@@ -323,9 +464,16 @@ function rowToProfile(r: Record<string, unknown>): Profile {
 // ---------- Sesiones ----------
 export async function listSessions(): Promise<SessionItem[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('sessions').select('*').order('date').order('time')
-    if (error) throw new Error(error.message)
-    return (data || []).map((r) => ({ ...r, level: r.level as Level | 'todos' }) as SessionItem)
+    try {
+      const { data, error } = await withTimeout(supabase.from('sessions').select('*').order('date').order('time'))
+      if (error) throw new Error(error.message)
+      const list = (data || []).map((r) => ({ ...r, level: r.level as Level | 'todos' }) as SessionItem)
+      cacheSet('sessions', list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<SessionItem[]>('sessions', load<SessionItem[]>('sessions', []))
+      throw e
+    }
   }
   return load<SessionItem[]>('sessions', []).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
 }
@@ -333,8 +481,16 @@ export async function listSessions(): Promise<SessionItem[]> {
 export async function createSession(s: Omit<SessionItem, 'id'>): Promise<SessionItem> {
   const item: SessionItem = { ...s, id: uid() }
   if (supabaseConfigured && supabase) {
-    const { error } = await supabase.from('sessions').insert(item)
-    if (error) throw new Error(error.message)
+    try {
+      const { error } = await withTimeout(supabase.from('sessions').insert(item))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      const list = cacheGet<SessionItem[]>('sessions', load<SessionItem[]>('sessions', []))
+      list.push(item)
+      cacheSet('sessions', list)
+      queueOffline({ kind: 'session', item })
+    }
     return item
   }
   const list = load<SessionItem[]>('sessions', [])
@@ -345,8 +501,12 @@ export async function createSession(s: Omit<SessionItem, 'id'>): Promise<Session
 
 export async function listRsvps(sessionId: string): Promise<Rsvp[]> {
   if (supabaseConfigured && supabase) {
-    const { data } = await supabase.from('rsvps').select('*').eq('session_id', sessionId)
-    return (data || []) as Rsvp[]
+    try {
+      const { data } = await withTimeout(supabase.from('rsvps').select('*').eq('session_id', sessionId))
+      return (data || []) as Rsvp[]
+    } catch {
+      return []
+    }
   }
   return load<Rsvp[]>('rsvps', []).filter((r) => r.session_id === sessionId)
 }
@@ -358,8 +518,14 @@ export async function joinSession(session: SessionItem, profileId: string): Prom
   const status: 'confirmed' | 'waitlist' = confirmed < session.capacity ? 'confirmed' : 'waitlist'
   const rsvp: Rsvp = { id: uid(), session_id: session.id, profile_id: profileId, status }
   if (supabaseConfigured && supabase) {
-    const { error } = await supabase.from('rsvps').insert(rsvp)
-    if (error) throw new Error(error.message)
+    try {
+      const { error } = await withTimeout(supabase.from('rsvps').insert(rsvp))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      // Sin internet: se apunta en el teléfono y se sube al volver la red.
+      queueOffline({ kind: 'rsvp', item: rsvp })
+    }
     return status
   }
   const all = load<Rsvp[]>('rsvps', [])
@@ -386,9 +552,16 @@ export async function cancelRsvp(sessionId: string, profileId: string): Promise<
 // ---------- Entrenamientos ----------
 export async function listWorkouts(profileId: string): Promise<Workout[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('workouts').select('*').eq('profile_id', profileId).order('date', { ascending: false })
-    if (error) throw new Error(error.message)
-    return (data || []) as Workout[]
+    try {
+      const { data, error } = await withTimeout(supabase.from('workouts').select('*').eq('profile_id', profileId).order('date', { ascending: false }))
+      if (error) throw new Error(error.message)
+      const list = (data || []) as Workout[]
+      cacheSet('workouts_' + profileId, list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<Workout[]>('workouts_' + profileId, load<Workout[]>('workouts', []).filter((w) => w.profile_id === profileId))
+      throw e
+    }
   }
   return load<Workout[]>('workouts', [])
     .filter((w) => w.profile_id === profileId)
@@ -398,9 +571,17 @@ export async function listWorkouts(profileId: string): Promise<Workout[]> {
 export async function logWorkout(w: Omit<Workout, 'id'>): Promise<Workout> {
   const item: Workout = { ...w, id: uid() }
   if (supabaseConfigured && supabase) {
-    const { route, ...rest } = item
-    const { error } = await supabase.from('workouts').insert({ ...rest, route: route || null })
-    if (error) throw new Error(error.message)
+    try {
+      const { route, ...rest } = item
+      const { error } = await withTimeout(supabase.from('workouts').insert({ ...rest, route: route || null }))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      const list = cacheGet<Workout[]>('workouts_' + item.profile_id, load<Workout[]>('workouts', []))
+      list.unshift(item)
+      cacheSet('workouts_' + item.profile_id, list)
+      queueOffline({ kind: 'workout', item })
+    }
     return item
   }
   const list = load<Workout[]>('workouts', [])
@@ -411,7 +592,12 @@ export async function logWorkout(w: Omit<Workout, 'id'>): Promise<Workout> {
 
 export async function deleteWorkout(id: string): Promise<void> {
   if (supabaseConfigured && supabase) {
-    await supabase.from('workouts').delete().eq('id', id)
+    try {
+      await withTimeout(supabase.from('workouts').delete().eq('id', id))
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      queueOffline({ kind: 'delete-workout', id })
+    }
     return
   }
   save('workouts', load<Workout[]>('workouts', []).filter((w) => w.id !== id))
@@ -420,18 +606,32 @@ export async function deleteWorkout(id: string): Promise<void> {
 // ---------- Retos, comunidad y negocios (estructura básica) ----------
 export async function listChallenges(): Promise<Challenge[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('challenges').select('*').order('start_date', { ascending: false })
-    if (error) throw new Error(error.message)
-    return (data || []) as Challenge[]
+    try {
+      const { data, error } = await withTimeout(supabase.from('challenges').select('*').order('start_date', { ascending: false }))
+      if (error) throw new Error(error.message)
+      const list = (data || []) as Challenge[]
+      cacheSet('challenges', list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<Challenge[]>('challenges', load<Challenge[]>('challenges', []))
+      throw e
+    }
   }
   return load<Challenge[]>('challenges', [])
 }
 
 export async function listPosts(): Promise<Post[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false })
-    if (error) throw new Error(error.message)
-    return (data || []) as Post[]
+    try {
+      const { data, error } = await withTimeout(supabase.from('posts').select('*').order('created_at', { ascending: false }))
+      if (error) throw new Error(error.message)
+      const list = (data || []) as Post[]
+      cacheSet('posts', list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<Post[]>('posts', load<Post[]>('posts', []))
+      throw e
+    }
   }
   return load<Post[]>('posts', []).sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
@@ -440,8 +640,16 @@ export async function createPost(profileId: string, authorName: string, text: st
   const post: Post = { id: uid(), profile_id: profileId, author_name: authorName, text: text.trim(), created_at: new Date().toISOString() }
   if (!post.text) throw new Error('Escribe algo para publicar.')
   if (supabaseConfigured && supabase) {
-    const { error } = await supabase.from('posts').insert(post)
-    if (error) throw new Error(error.message)
+    try {
+      const { error } = await withTimeout(supabase.from('posts').insert(post))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      const list = cacheGet<Post[]>('posts', load<Post[]>('posts', []))
+      list.unshift(post)
+      cacheSet('posts', list)
+      queueOffline({ kind: 'post', item: post })
+    }
     return post
   }
   const list = load<Post[]>('posts', [])
@@ -452,9 +660,16 @@ export async function createPost(profileId: string, authorName: string, text: st
 
 export async function listBusinesses(): Promise<Business[]> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('businesses').select('*').order('name')
-    if (error) throw new Error(error.message)
-    return (data || []) as Business[]
+    try {
+      const { data, error } = await withTimeout(supabase.from('businesses').select('*').order('name'))
+      if (error) throw new Error(error.message)
+      const list = (data || []) as Business[]
+      cacheSet('businesses', list)
+      return list
+    } catch (e) {
+      if (isNetworkError(e)) return cacheGet<Business[]>('businesses', load<Business[]>('businesses', []))
+      throw e
+    }
   }
   return load<Business[]>('businesses', [])
 }
@@ -464,10 +679,16 @@ export async function listBusinesses(): Promise<Business[]> {
 // a la tabla training_plans; en modo local, a localStorage.
 export async function getPlan(profileId: string): Promise<TrainingPlan | null> {
   if (supabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('training_plans')
-      .select('*').eq('profile_id', profileId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-    if (error || !data) return null
-    return rowToPlan(data)
+    try {
+      const { data, error } = await withTimeout(supabase.from('training_plans')
+        .select('*').eq('profile_id', profileId).order('created_at', { ascending: false }).limit(1).maybeSingle())
+      if (error || !data) return cacheGet<TrainingPlan | null>('plan_' + profileId, null)
+      const plan = rowToPlan(data)
+      cacheSet('plan_' + profileId, plan)
+      return plan
+    } catch {
+      return cacheGet<TrainingPlan | null>('plan_' + profileId, null)
+    }
   }
   const plans = load<TrainingPlan[]>('plans', []).filter((p) => p.profile_id === profileId)
   return plans.sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null
@@ -475,13 +696,20 @@ export async function getPlan(profileId: string): Promise<TrainingPlan | null> {
 
 export async function savePlan(plan: TrainingPlan): Promise<TrainingPlan> {
   if (supabaseConfigured && supabase) {
-    const { error } = await supabase.from('training_plans').insert({
-      id: plan.id, profile_id: plan.profile_id, sport: plan.sport, level: plan.level,
-      goal: plan.goal, days_per_week: plan.days_per_week, minutes_per_session: plan.minutes_per_session,
-      adjustment: plan.adjustment, week_goal_km: plan.week_goal_km || null,
-      tasks: plan.tasks,
-    })
-    if (error) throw new Error(error.message)
+    try {
+      const { error } = await withTimeout(supabase.from('training_plans').insert({
+        id: plan.id, profile_id: plan.profile_id, sport: plan.sport, level: plan.level,
+        goal: plan.goal, days_per_week: plan.days_per_week, minutes_per_session: plan.minutes_per_session,
+        adjustment: plan.adjustment, week_goal_km: plan.week_goal_km || null,
+        tasks: plan.tasks,
+      }))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (!isNetworkError(e)) throw e
+      cacheSet('plan_' + plan.profile_id, plan)
+      queueOffline({ kind: 'plan', item: plan })
+    }
+    cacheSet('plan_' + plan.profile_id, plan)
     return plan
   }
   const plans = load<TrainingPlan[]>('plans', [])
