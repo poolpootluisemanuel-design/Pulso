@@ -11,16 +11,44 @@ export interface GpsResult {
   route: Point[]
 }
 
+export interface GpsProgress { active: boolean; status: 'idle' | 'recording' | 'paused' | 'done'; seconds: number; distanceKm: number; sport: string }
+
+const GPS_SAVED_KEY = 'pulso_local_gps_in_progress'
+
+interface SavedGps { sport: string; seconds: number; distanceKm: number; points: Point[]; savedAt: number }
+
+function loadSavedGps(): SavedGps | null {
+  try {
+    const raw = localStorage.getItem(GPS_SAVED_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as SavedGps
+    if (!parsed || !Array.isArray(parsed.points)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export { GPS_SAVED_KEY }
+
 /** Grabar con GPS: tiempo, distancia, ritmo, ruta, pausa y reanudar.
  *  Usa la API de geolocalización del navegador. Pide permiso de ubicación:
- *  sin permiso, muestra el mensaje y no graba. */
-export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult) => void; onCancel: () => void }) {
-  const [sport, setSport] = useState('Caminata')
-  const [status, setStatus] = useState<'idle' | 'recording' | 'paused' | 'done'>('idle')
-  const [seconds, setSeconds] = useState(0)
-  const [distanceKm, setDistanceKm] = useState(0)
-  const [error, setError] = useState('')
-  const [points, setPoints] = useState<Point[]>([])
+ *  sin permiso, muestra el mensaje y no graba.
+ *  La grabación en curso se guarda en localStorage mientras graba, así
+ *  sobrevive al cambiar de pestaña (Train ya no se desmonta) y a recargar:
+ *  al volver queda en pausa, lista para reanudar donde iba. */
+export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void }) {
+  const savedRef = useRef<SavedGps | null>(null)
+  if (savedRef.current === null) savedRef.current = loadSavedGps()
+  const saved = savedRef.current
+  const [sport, setSport] = useState(saved?.sport || 'Caminata')
+  // Una grabación guardada se restaura en pausa: no se reanuda sola sin
+  // que el usuario toque Reanudar (el navegador no daría GPS sin gesto).
+  const [status, setStatus] = useState<'idle' | 'recording' | 'paused' | 'done'>(saved ? 'paused' : 'idle')
+  const [seconds, setSeconds] = useState(saved?.seconds || 0)
+  const [distanceKm, setDistanceKm] = useState(saved?.distanceKm || 0)
+  const [error, setError] = useState(saved ? 'Tienes una grabación sin terminar. Toca Reanudar para seguir donde ibas.' : '')
+  const [points, setPoints] = useState<Point[]>(saved?.points || [])
   const watchId = useRef<number | null>(null)
   const lastPoint = useRef<Point | null>(null)
   const lastTime = useRef<number>(0)
@@ -31,6 +59,23 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
     const t = setInterval(() => setSeconds((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [status])
+
+  // Guardar el progreso mientras graba / en pausa: sobrevive a recargar.
+  // Al terminar, guardar o descartar se borra.
+  useEffect(() => {
+    try {
+      if (status === 'recording' || status === 'paused') {
+        localStorage.setItem(GPS_SAVED_KEY, JSON.stringify({ sport, seconds, distanceKm, points, savedAt: Date.now() }))
+      } else {
+        localStorage.removeItem(GPS_SAVED_KEY)
+      }
+    } catch { /* localStorage lleno o bloqueado: la grabación sigue en memoria */ }
+  }, [status, seconds, distanceKm, points, sport])
+
+  // Avisar arriba (App) para la barrita "Grabando…".
+  useEffect(() => {
+    onProgress?.({ active: status === 'recording' || status === 'paused', status, seconds, distanceKm, sport })
+  }, [status, seconds, distanceKm, sport, onProgress])
 
   // Mantener la pantalla encendida mientras graba (si el navegador lo permite).
   // Al volver a la app se pide de nuevo: el navegador puede soltarlo al
@@ -53,6 +98,59 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
   }, [])
 
+  function stopWatch() {
+    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
+    watchId.current = null
+  }
+
+  function startWatch(from: Point) {
+    lastPoint.current = from
+    lastTime.current = Date.now()
+    watchId.current = navigator.geolocation.watchPosition(
+      (pos2) => {
+        if (pos2.coords.accuracy > 25) return // punto poco preciso, se descarta
+        const next = { lat: pos2.coords.latitude, lng: pos2.coords.longitude }
+        const prev = lastPoint.current
+        if (!prev) { lastPoint.current = next; return }
+        const d = haversineKm(prev, next)
+        if (d < 0.003) return // menos de 3 m: ruido del GPS, se ignora
+        if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
+        lastPoint.current = next
+        setDistanceKm((km) => km + d)
+        setPoints((pts) => [...pts, next])
+      },
+      () => setError('Se perdió la señal GPS. La grabación sigue con lo que llevaba.'),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    )
+  }
+
+  function pause() {
+    // Antes la pausa solo cambiaba el texto: el watch seguía sumando
+    // distancia. Ahora sí se detiene el GPS hasta reanudar.
+    stopWatch()
+    setStatus('paused')
+  }
+
+  function resume() {
+    setError('')
+    if (!('geolocation' in navigator)) {
+      setError('Este teléfono o navegador no tiene GPS disponible. Usa el registro manual.')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
+        // si no, este es el primer punto.
+        if (points.length === 0) setPoints([p])
+        setStatus('recording')
+        startWatch(p)
+      },
+      () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
   function start() {
     setError('')
     if (!('geolocation' in navigator)) {
@@ -62,26 +160,9 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        lastPoint.current = p
-        lastTime.current = Date.now()
         setPoints([p])
         setStatus('recording')
-        watchId.current = navigator.geolocation.watchPosition(
-          (pos2) => {
-            if (pos2.coords.accuracy > 25) return // punto poco preciso, se descarta
-            const next = { lat: pos2.coords.latitude, lng: pos2.coords.longitude }
-            const prev = lastPoint.current
-            if (!prev) { lastPoint.current = next; return }
-            const d = haversineKm(prev, next)
-            if (d < 0.003) return // menos de 3 m: ruido del GPS, se ignora
-            if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
-            lastPoint.current = next
-            setDistanceKm((km) => km + d)
-            setPoints((pts) => [...pts, next])
-          },
-          () => setError('Se perdió la señal GPS. La grabación sigue con lo que llevaba.'),
-          { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-        )
+        startWatch(p)
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
       { enableHighAccuracy: true, timeout: 10000 }
@@ -89,8 +170,7 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
   }
 
   function finish() {
-    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
-    watchId.current = null
+    stopWatch()
     setStatus('done')
   }
 
@@ -152,8 +232,8 @@ export default function GpsTracker({ onSave, onCancel }: { onSave: (r: GpsResult
           {error && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">{error}</p>}
           <div className="flex gap-2">
             {status === 'recording'
-              ? <Btn variant="ghost" className="flex-1" onClick={() => setStatus('paused')}>Pausar</Btn>
-              : <Btn variant="teal" className="flex-1" onClick={() => setStatus('recording')}>Reanudar</Btn>}
+              ? <Btn variant="ghost" className="flex-1" onClick={pause}>Pausar</Btn>
+              : <Btn variant="teal" className="flex-1" onClick={resume}>Reanudar</Btn>}
             <Btn variant="coral" className="flex-1" onClick={finish}>Terminar</Btn>
           </div>
         </div>

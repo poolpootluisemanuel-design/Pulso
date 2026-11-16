@@ -88,7 +88,9 @@ function cleanTrackName(name: string): string {
   return name.replace(/\.(mp3|m4a|wav|ogg|flac|aac)$/i, '').replace(/[_-]+/g, ' ').trim() || name
 }
 
-export default function MusicPlayer({ profileId }: { profileId: string }) {
+export interface MusicStatus { playing: boolean; title: string; source: 'youtube' | 'local' }
+
+export default function MusicPlayer({ profileId, onPlayingChange }: { profileId: string; onPlayingChange?: (m: MusicStatus) => void }) {
   const [pref, setPref] = useState(() => getMusicPref(profileId))
   const [playing, setPlaying] = useState(false)
   const [customInput, setCustomInput] = useState(() => getMusicPref(profileId).customUrl)
@@ -112,6 +114,12 @@ export default function MusicPlayer({ profileId }: { profileId: string }) {
   const playingTitle = `PULSO — ${title}`
   const currentLocal = localTracks[localIndex] || null
   const anyPlaying = playing || localPlaying
+  const statusTitle = source === 'local' && currentLocal ? cleanTrackName(currentLocal.name) : title
+
+  // Avisar arriba (App) para la barrita de música activa.
+  useEffect(() => {
+    onPlayingChange?.({ playing: anyPlaying, title: statusTitle, source })
+  }, [anyPlaying, statusTitle, source, onPlayingChange])
 
   // Mantener pantalla encendida mientras suena (YouTube o local, si el
   // navegador lo permite). Fallback silencioso: si no hay Wake Lock,

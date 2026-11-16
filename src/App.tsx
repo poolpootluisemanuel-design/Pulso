@@ -7,6 +7,7 @@ import ProfileTab from './components/ProfileTab'
 import Search from './components/Search'
 import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
+import type { TrainActivity } from './components/Train'
 import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
 
@@ -40,6 +41,9 @@ export default function App() {
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
   const [installDismissed, setInstallDismissed] = useState(false)
+  // Actividad en curso de Entrenar (GPS / música): para la barrita que
+  // aparece al cambiar de pestaña y vuelve a Entrenar al tocarla.
+  const [activity, setActivity] = useState<TrainActivity>({ gps: null, music: null })
 
   const isStandalone =
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -142,11 +146,39 @@ export default function App() {
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
         {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} />}
-        {tab === 'entrenar' && <Train profile={profile} workouts={workouts} onRefresh={loadAll} />}
+        {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
+            antes se desmontaba al cambiar de pestaña y se perdía el GPS
+            que se estaba grabando y la música. Así el cronómetro, la ruta
+            y el reproductor siguen vivos en cualquier pestaña. */}
+        <div className={tab === 'entrenar' ? '' : 'hidden'}>
+          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={setActivity} />
+        </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
         {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
       </main>
+
+      {/* Barrita de actividad: mientras hay GPS grabando/pausado o música
+          sonando, aparece en cualquier pestaña; al tocarla vuelve a Entrenar. */}
+      {tab !== 'entrenar' && (activity.gps?.active || activity.music?.playing) && (
+        <button
+          onClick={() => setTab('entrenar')}
+          className="fixed bottom-[72px] left-0 right-0 z-20 mx-auto flex max-w-2xl items-center justify-between gap-2 px-4"
+        >
+          <span className="flex flex-1 items-center gap-2 rounded-full bg-night px-4 py-2.5 text-sm font-bold text-white shadow-xl shadow-night/40">
+            {activity.gps?.active && (
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-pulso" />
+                {activity.gps.status === 'paused' ? '⏸ Pausado' : '● Grabando'} {String(Math.floor(activity.gps.seconds / 60)).padStart(2, '0')}:{String(activity.gps.seconds % 60).padStart(2, '0')} · {activity.gps.distanceKm.toFixed(2)} km
+              </span>
+            )}
+            {activity.music?.playing && (
+              <span className="truncate">🎵 {activity.music.title}</span>
+            )}
+            <span className="ml-auto shrink-0 text-teal">Volver →</span>
+          </span>
+        </button>
+      )}
 
       {/* Botón flotante para crear sesión */}
       <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"

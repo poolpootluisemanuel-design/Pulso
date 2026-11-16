@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Profile, Workout } from '../lib/types'
 import { SPORTS } from '../lib/types'
 import { deleteWorkout, logWorkout } from '../lib/store'
 import { formatDate, paceMinKm, todayISO } from '../lib/utils'
-import GpsTracker from './GpsTracker'
+import GpsTracker, { GPS_SAVED_KEY } from './GpsTracker'
+import type { GpsProgress } from './GpsTracker'
 import MusicPlayer from './MusicPlayer'
+import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
 
@@ -25,8 +27,21 @@ function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; 
   )
 }
 
-export default function Train({ profile, workouts, onRefresh }: { profile: Profile; workouts: Workout[]; onRefresh: () => void }) {
-  const [showGps, setShowGps] = useState(false)
+export interface TrainActivity { gps: GpsProgress | null; music: MusicStatus | null }
+
+export default function Train({ profile, workouts, onRefresh, onActivity }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void }) {
+  // Si hay una grabación GPS guardada sin terminar, abrir el GPS directo
+  // para que Luis la vea y pueda reanudarla, en vez de esconderla detrás
+  // del botón "Grabar con GPS".
+  const [showGps, setShowGps] = useState(() => {
+    try { return localStorage.getItem(GPS_SAVED_KEY) !== null } catch { return false }
+  })
+  const [gps, setGps] = useState<GpsProgress | null>(null)
+  const [music, setMusic] = useState<MusicStatus | null>(null)
+
+  useEffect(() => {
+    onActivity?.({ gps, music })
+  }, [gps, music, onActivity])
   const [sport, setSport] = useState('Caminata')
   const [date, setDate] = useState(todayISO())
   const [duration, setDuration] = useState('30')
@@ -65,6 +80,7 @@ export default function Train({ profile, workouts, onRefresh }: { profile: Profi
 
       {showGps ? (
         <GpsTracker
+          onProgress={setGps}
           onCancel={() => setShowGps(false)}
           onSave={async (r) => {
             await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
@@ -77,7 +93,7 @@ export default function Train({ profile, workouts, onRefresh }: { profile: Profi
         <Btn variant="coral" className="w-full" onClick={() => setShowGps(true)}>📍 Grabar con GPS</Btn>
       )}
 
-      <MusicPlayer profileId={profile.id} />
+      <MusicPlayer profileId={profile.id} onPlayingChange={setMusic} />
       <CoachPlan profile={profile} workouts={workouts} onRefresh={onRefresh} />
 
       <Card>
