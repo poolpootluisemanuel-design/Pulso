@@ -131,7 +131,10 @@ export async function signUp(name: string, email: string, password: string): Pro
   if (supabaseConfigured && supabase) {
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail, password,
-      options: { data: { name: name.trim() } },
+      // El link de confirmación debe volver a ESTA app, no al default
+      // de Supabase (http://localhost:3000, que no existe en el
+      // teléfono y daba error al confirmar el correo).
+      options: { data: { name: name.trim() }, emailRedirectTo: window.location.origin },
     })
     if (error) throw new Error(error.message)
     if (!data.user) throw new Error('No se pudo crear la cuenta. Revisa tu correo, puede pedir confirmación.')
@@ -214,7 +217,12 @@ export async function resetPassword(email: string): Promise<void> {
   const cleanEmail = email.trim().toLowerCase()
   if (supabaseConfigured && supabase) {
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-      redirectTo: window.location.origin + '/reset',
+      // Volver al origen real de la app. Antes era origin + '/reset',
+      // pero la app no tiene ruta /reset (daría 404 en Vercel): al
+      // volver al origen, Supabase detecta la sesión de recuperación
+      // en el link y la app abre ya con la sesión, para cambiar la
+      // contraseña desde el perfil.
+      redirectTo: window.location.origin,
     })
     if (error) throw new Error(error.message)
     return
