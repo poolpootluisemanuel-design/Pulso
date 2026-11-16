@@ -48,6 +48,16 @@ export default function App() {
   const [online, setOnline] = useState(() => navigator.onLine)
   const [pending, setPending] = useState(0)
   const [slowLoad, setSlowLoad] = useState(false)
+  // Versión nueva esperando: main.tsx avisa con 'pulso-sw-update'
+  // cuando el service worker nuevo ya se descargó. Mostrar el aviso
+  // y que Luis toque Actualizar (skipWaiting + recarga) en vez de
+  // tener que borrar el caché para ver cada ajuste.
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  useEffect(() => {
+    const onUpdate = () => setUpdateAvailable(true)
+    window.addEventListener('pulso-sw-update', onUpdate)
+    return () => window.removeEventListener('pulso-sw-update', onUpdate)
+  }, [])
 
   // La app ya se instala desde Chrome (íconos PWA subidos): Luis pidió
   // quitar la leyenda de cómo instalar y el banner propio, así que no
@@ -142,6 +152,23 @@ export default function App() {
     }
   }, [loadAll])
 
+  // Aviso de versión nueva: toca Actualizar y la app recarga con el
+  // ajuste nuevo, sin borrar caché ni datos. Se muestra también en
+  // la pantalla de acceso, para que el aviso no dependa de entrar.
+  const updateBanner = updateAvailable ? (
+    <div className="mx-auto mt-3 max-w-2xl px-4">
+      <div className="flex items-center justify-between gap-3 rounded-3xl bg-night p-3 text-white shadow-md">
+        <p className="text-sm font-semibold">✨ Hay una versión nueva de PULSO</p>
+        <button
+          onClick={() => window.__pulsoApplyUpdate?.()}
+          className="shrink-0 rounded-full bg-pulso px-4 py-2 text-sm font-black text-white"
+        >
+          Actualizar
+        </button>
+      </div>
+    </div>
+  ) : null
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-night">
@@ -157,6 +184,7 @@ export default function App() {
   if (!user || !profile) {
     return (
       <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+        {updateBanner}
         <Auth onDone={() => { setLoading(true); loadAll() }} />
       </div>
     )
@@ -193,6 +221,7 @@ export default function App() {
 
       {/* Aviso offline: la app sigue funcionando con lo guardado en el
           teléfono. GPS y música local no necesitan internet; YouTube sí. */}
+      {updateBanner}
       {!online && (
         <div className="mx-auto mt-3 max-w-2xl px-4">
           <p className="rounded-3xl bg-amber-100 p-3 text-center text-sm font-semibold text-amber-900 shadow-md">

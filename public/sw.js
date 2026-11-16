@@ -5,7 +5,7 @@
 //   sin ellos la app se quedaba en blanco al abrir sin red.
 // - Las fotos hero de Unsplash, solo si ya se cargaron una vez con internet.
 // NO cachea llamadas a Supabase (siempre van a la red) ni videos de YouTube.
-const CACHE = 'pulso-v2'
+const CACHE = 'pulso-v3'
 const CORE = [
   '/',
  '/index.html', '/manifest.webmanifest',
@@ -14,10 +14,17 @@ const CORE = [
 ]
 
 self.addEventListener('install', (event) => {
+  // Cachea la shell. Si un archivo falla (p. ej. un ícono), no se
+  // aborta toda la instalación: se cachea lo que sí cargó.
+  // NO se llama a skipWaiting aquí a propósito: la versión nueva
+  // queda esperando y la app avisa "Hay una versión nueva — Actualizar".
+  // Así Luis no pierde una grabación GPS o la música a mitad, y no
+  // tiene que borrar el caché: toca Actualizar y la app recarga sola.
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(CORE)).catch(() => undefined)
+    caches.open(CACHE).then((cache) =>
+      Promise.allSettled(CORE.map((url) => cache.add(url)))
+    ).catch(() => undefined)
   )
-  self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
@@ -30,7 +37,7 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'skipWaiting') self.skipWaiting()
+  if (event.data === 'skipWaiting' || event.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })
 
 self.addEventListener('fetch', (event) => {
@@ -63,9 +70,12 @@ self.addEventListener('fetch', (event) => {
 
   // Navegación (abrir la app / recargar): network-first, con fallback
   // a la shell cacheada cuando no hay internet. Así nunca queda en blanco.
+  // El fetch va con cache: 'no-cache' para que, habiendo internet, nunca
+  // se sirva un index.html viejo guardado: el index nuevo trae los
+  // bundles nuevos (con hash distinto) y el viejo queda invalidado.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).then((res) => {
+      fetch(request, { cache: 'no-cache' }).then((res) => {
         const copy = res.clone()
         caches.open(CACHE).then((cache) => cache.put('/index.html', copy)).catch(() => undefined)
         return res
