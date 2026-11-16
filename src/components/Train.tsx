@@ -5,7 +5,6 @@ import { deleteWorkout, logWorkout } from '../lib/store'
 import { formatDate, paceMinKm, todayISO } from '../lib/utils'
 import GpsTracker, { GPS_SAVED_KEY } from './GpsTracker'
 import type { GpsProgress } from './GpsTracker'
-import MusicPlayer from './MusicPlayer'
 import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
@@ -29,7 +28,7 @@ function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; 
 
 export interface TrainActivity { gps: GpsProgress | null; music: MusicStatus | null }
 
-export default function Train({ profile, workouts, onRefresh, onActivity }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void }) {
+export default function Train({ profile, workouts, onRefresh, onActivity, onShowMusic }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void }) {
   // Si hay una grabación GPS guardada sin terminar, abrir el GPS directo
   // para que Luis la vea y pueda reanudarla, en vez de esconderla detrás
   // del botón "Grabar con GPS".
@@ -37,11 +36,13 @@ export default function Train({ profile, workouts, onRefresh, onActivity }: { pr
     try { return localStorage.getItem(GPS_SAVED_KEY) !== null } catch { return false }
   })
   const [gps, setGps] = useState<GpsProgress | null>(null)
-  const [music, setMusic] = useState<MusicStatus | null>(null)
 
+  // La música ya no vive aquí: el reproductor está montado en App.tsx
+  // y se ve abajo en esta misma pantalla (o como mini-barra en las
+  // demás pestañas), así que al cambiar de pestaña no se corta.
   useEffect(() => {
-    onActivity?.({ gps, music })
-  }, [gps, music, onActivity])
+    onActivity?.({ gps, music: null })
+  }, [gps, onActivity])
   const [sport, setSport] = useState('Caminata')
   const [date, setDate] = useState(todayISO())
   const [duration, setDuration] = useState('30')
@@ -93,7 +94,12 @@ export default function Train({ profile, workouts, onRefresh, onActivity }: { pr
         <Btn variant="coral" className="w-full" onClick={() => setShowGps(true)}>📍 Grabar con GPS</Btn>
       )}
 
-      <MusicPlayer profileId={profile.id} onPlayingChange={setMusic} />
+      {/* Música: el reproductor persistente vive abajo en esta pantalla
+          (montado en App); este botón baja hasta él. */}
+      <button onClick={onShowMusic} className="w-full rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-md shadow-night/5">
+        <p className="text-lg font-bold">🎵 Música para entrenar</p>
+        <p className="text-sm text-slate-500">YouTube o música local. Sigue sonando aunque cambies de pestaña. Toca para ir al reproductor ↓</p>
+      </button>
       <CoachPlan profile={profile} workouts={workouts} onRefresh={onRefresh} />
 
       <Card>

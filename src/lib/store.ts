@@ -8,7 +8,7 @@
 // Nunca se inventan credenciales aquí.
 import { supabase, supabaseConfigured } from './supabase'
 import type { AuthUser, Business, Challenge, Level, PlanTask, Post, Profile, Rsvp, SessionItem, SportLevel, TrainingPlan, Workout } from './types'
-import { addDaysISO, sha256, uid } from './utils'
+import { addDaysISO, legacyLocalHash, sha256, uid } from './utils'
 
 export const mode = supabaseConfigured ? 'supabase' : 'local'
 
@@ -71,6 +71,24 @@ function seedLocal(): void {
 if (!supabaseConfigured) seedLocal()
 
 // ---------- Auth ----------
+// La sesión se guarda en localStorage Y en una cookie (mismo id): si el
+// navegador pierde una de las dos al cerrar la pestaña, la otra rescata
+// la sesión. La cookie no lleva la contraseña, solo el id de sesión.
+function setSession(id: string): void {
+  localStorage.setItem(LS + 'session', id)
+  try { document.cookie = `${LS}session=${id}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax` } catch { /* noop */ }
+}
+function clearSession(): void {
+  localStorage.removeItem(LS + 'session')
+  try { document.cookie = `${LS}session=; path=/; max-age=0; SameSite=Lax` } catch { /* noop */ }
+}
+function getSessionId(): string | null {
+  const ls = localStorage.getItem(LS + 'session')
+  if (ls) return ls
+  const m = document.cookie.match(new RegExp('(?:^|; )' + LS + 'session=([^;]*)'))
+  return m ? decodeURIComponent(m[1]) : null
+}
+
 export async function getCurrentUser(): Promise<AuthUser | null> {
   if (supabaseConfigured && supabase) {
     const { data } = await supabase.auth.getUser()
@@ -78,7 +96,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     const { data: prof } = await supabase.from('profiles').select('name').eq('id', data.user.id).maybeSingle()
     return { id: data.user.id, email: data.user.email || '', name: (prof?.name as string) || 'Sin nombre' }
   }
-  const id = localStorage.getItem(LS + 'session')
+  const id = getSessionId()
   if (!id) return null
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.id === id)
@@ -109,7 +127,7 @@ export async function signUp(name: string, email: string, password: string): Pro
   const profiles = load<Profile[]>('profiles', [])
   profiles.push(profile)
   save('profiles', profiles)
-  localStorage.setItem(LS + 'session', id)
+  setSession(id)
   return { id, email: cleanEmail, name: name.trim() }
 }
 
@@ -124,8 +142,17 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
   }
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.email === cleanEmail)
-  if (!u || (await sha256(password)) !== u.passwordHash) throw new Error('Correo o contraseña incorrectos.')
-  localStorage.setItem(LS + 'session', u.id)
+  // Acepta el hash SHA-256 actual y, para cuentas creadas antes del
+  // arreglo, el hash viejo 'local-…': si entra con el viejo, se le
+  // actualiza el hash al nuevo para que no vuelva a fallar.
+  const newHash = await sha256(password)
+  const ok = !!u && (u.passwordHash === newHash || u.passwordHash === legacyLocalHash(password))
+  if (!ok || !u) throw new Error('Correo o contraseña incorrectos.')
+  if (u.passwordHash !== newHash) {
+    u.passwordHash = newHash
+    save('users', users)
+  }
+  setSession(u.id)
   return { id: u.id, email: u.email, name: u.name }
 }
 
@@ -153,7 +180,7 @@ export async function setNewPasswordLocal(email: string, password: string): Prom
   if (!u) throw new Error('Ese correo no tiene cuenta.')
   u.passwordHash = await sha256(password)
   save('users', users)
-  localStorage.setItem(LS + 'session', u.id)
+  setSession(u.id)
   localStorage.removeItem(LS + 'reset-email')
 }
 
@@ -171,14 +198,15 @@ export async function changePassword(current: string, next: string): Promise<voi
   }
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.id === me.id)
-  if (!u || (await sha256(current)) !== u.passwordHash) throw new Error('Tu contraseña actual no coincide.')
+  const currentHash = await sha256(current)
+  if (!u || (u.passwordHash !== currentHash && u.passwordHash !== legacyLocalHash(current))) throw new Error('Tu contraseña actual no coincide.')
   u.passwordHash = await sha256(next)
   save('users', users)
 }
 
 export async function signOut(): Promise<void> {
   if (supabaseConfigured && supabase) await supabase.auth.signOut()
-  localStorage.removeItem(LS + 'session')
+  clearSession()
 }
 
 // ---------- Perfiles ----------

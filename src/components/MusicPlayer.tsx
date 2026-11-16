@@ -1,42 +1,40 @@
 // Música para entrenar: YouTube o música local del teléfono (opcional).
-// - YouTube: las playlists por tipo de entrenamiento usan el buscador
-//   de YouTube (listType=search): no se inventan IDs, siempre devuelven
-//   resultados reales. El usuario puede pegar su propia playlist y se
-//   guarda en su teléfono. El reproductor es el iframe oficial
-//   (youtube-nocookie).
-// - NO se puede descargar música de YouTube: los términos de YouTube no
-//   lo permiten y PULSO no descarga audio de YouTube. La opción local
-//   es solo para canciones que el usuario YA tenga descargadas en su
-//   teléfono (sus propios MP3 / archivos de audio): se eligen con el
-//   selector de archivos y suenan solo en ese dispositivo, sin subirse
-//   a ningún servidor. Al cerrar la app hay que volver a elegirlas.
-// - Segundo plano, explicado sin mentir:
-//   * Con la pantalla encendida (Wake Lock, interruptor de abajo) la
-//     música sigue sonando mientras entrenas o grabas con GPS.
-//   * YouTube web puede pausar si bloqueas la pantalla o cambias de
-//     app. Para segundo plano real con pantalla apagada hace falta
-//     YouTube Premium: usa "Abrir en YouTube" y ahí sigue sonando.
-//   * La música local usa <audio> con Media Session: se controla desde
-//     la pantalla de bloqueo / notificaciones y aguanta mejor en
-//     segundo plano que el iframe de YouTube, pero el navegador web
-//     también puede pausarla si bloqueas la pantalla mucho tiempo.
-//     Spotify Premium después sería la otra opción.
-// - Media Session: mientras suena, aparecen título y controles de
-//   PULSO en la pantalla de bloqueo / notificaciones del teléfono.
+// - YouTube: cada preset es un VIDEO REAL de YouTube (mix largo de
+//   música para entrenar), verificado con yt-dlp: playable_in_embed=True
+//   y oEmbed 200 para los 8 IDs. El embed viejo usaba
+//   youtube-nocookie.com/embed?listType=search, que en el navegador
+//   muestra "Este video no está disponible" y nunca suena: por eso Luis
+//   lo percibía como que "se resetea". Ahora se incrusta con la API
+//   oficial de YouTube (iframe_api) sobre youtube.com/embed/<videoId>.
+//   Si un video falla al incrustarse (error 101/150), se muestra el
+//   aviso y el botón "Abrir en YouTube" sigue funcionando.
+// - El usuario puede pegar su propia playlist/video y se guarda.
+// - NO se puede descargar música de YouTube. La opción local es solo
+//   para canciones que el usuario YA tenga descargadas en su teléfono.
+// - Este componente vive MONTADO EN App.tsx, fuera de las pestañas:
+//   nunca se oculta con display:none (eso pausa el iframe de YouTube).
+//   En Entrenar se ve la tarjeta completa; en las demás pestañas se ve
+//   la mini-barra fija con el video chiquito pero visible, y el audio
+//   sigue sonando.
+// - Segundo plano: con pantalla encendida (Wake Lock) la música sigue;
+//   con pantalla apagada hace falta YouTube Premium ("Abrir en YouTube").
+//   La música local (<audio> + Media Session) aguanta mejor.
 import { useEffect, useRef, useState } from 'react'
 import { getMusicPref, saveMusicPref } from '../lib/store'
-import { Btn, Card, Field, inputCls } from './ui'
+import { Btn, Field, inputCls } from './ui'
 
-interface Preset { id: string; label: string; emoji: string; query: string }
-
+// Videos reales de YouTube por deporte (mixes largos, públicos).
+// Verificados 2026-11-16 con yt-dlp: playable_in_embed=True, oEmbed 200.
+// NO inventar IDs: si se cambia uno, verificarlo igual antes de subirlo.
+export interface Preset { id: string; label: string; emoji: string; query: string; videoId: string }
 export const MUSIC_PRESETS: Preset[] = [
-  { id: 'caminata', label: 'Caminata', emoji: '🚶', query: 'música para caminar relajante' },
-  { id: 'correr', label: 'Correr', emoji: '🏃', query: 'música para correr energía' },
-  { id: 'ciclismo', label: 'Ciclismo', emoji: '🚴', query: 'música para ciclismo ruta' },
-  { id: 'crossfit', label: 'CrossFit', emoji: '💪', query: 'música para entrenar crossfit intensa' },
-  { id: 'padel', label: 'Pádel', emoji: '🎾', query: 'música para jugar pádel' },
-  { id: 'gym', label: 'Gym', emoji: '🏋️', query: 'música para entrenar gym motivación' },
-  { id: 'general', label: 'General', emoji: '🎵', query: 'música para entrenar motivación' },
+  { id: 'caminata', label: 'Caminata', emoji: '🚶', query: 'música para caminar relajante', videoId: 'Y1gV3k3g7cA' },
+  { id: 'correr', label: 'Correr', emoji: '🏃', query: 'música para correr energía', videoId: 'I33eXtFOWRE' },
+  { id: 'ciclismo', label: 'Ciclismo', emoji: '🚴', query: 'música para ciclismo ruta', videoId: 'WKIcALqtWbc' },
+  { id: 'crossfit', label: 'CrossFit', emoji: '💪', query: 'música para entrenar crossfit intensa', videoId: 'ClmbRcCfXQY' },
+  { id: 'padel', label: 'Pádel', emoji: '🎾', query: 'música para jugar pádel', videoId: 'MnKnCBV8GDU' },
+  { id: 'gym', label: 'Gym', emoji: '🏋️', query: 'música para entrenar gym motivación', videoId: 'T45bv_9vTFg' },
+  { id: 'general', label: 'General', emoji: '🎵', query: 'música para entrenar motivación', videoId: 'a-EkjVGqXtY' },
 ]
 
 interface LocalTrack { name: string; url: string }
@@ -57,19 +55,20 @@ export function parseYouTubeUrl(url: string): { kind: 'playlist' | 'video'; id: 
   return null
 }
 
+// Embed de respaldo (solo si la API de YouTube no carga): youtube.com,
+// video real, NUNCA listType=search en youtube-nocookie (ese no suena).
 function embedSrc(preset: Preset, custom: { kind: 'playlist' | 'video'; id: string } | null, playing: boolean): string {
   const autoplay = playing ? '&autoplay=1' : ''
-  if (custom?.kind === 'playlist') return `https://www.youtube-nocookie.com/embed/videoseries?list=${custom.id}${autoplay}`
-  if (custom?.kind === 'video') return `https://www.youtube-nocookie.com/embed/${custom.id}?rel=0${autoplay}`
-  return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(preset.query)}${autoplay}`
+  if (custom?.kind === 'playlist') return `https://www.youtube.com/embed/videoseries?list=${custom.id}&rel=0${autoplay}`
+  if (custom?.kind === 'video') return `https://www.youtube.com/embed/${custom.id}?rel=0${autoplay}`
+  return `https://www.youtube.com/embed/${preset.videoId}?rel=0${autoplay}`
 }
 
-// Link normal de YouTube (no embed) para abrir en la app / pestaña de
-// YouTube: ahí sí sigue sonando en segundo plano si tiene Premium.
+// Link normal de YouTube para abrir en la app / pestaña de YouTube.
 function externalUrl(preset: Preset, custom: { kind: 'playlist' | 'video'; id: string } | null): string {
   if (custom?.kind === 'playlist') return `https://www.youtube.com/playlist?list=${custom.id}`
   if (custom?.kind === 'video') return `https://www.youtube.com/watch?v=${custom.id}`
-  return `https://www.youtube.com/results?search_query=${encodeURIComponent(preset.query)}`
+  return `https://www.youtube.com/watch?v=${preset.videoId}`
 }
 
 type WakeLockSentinel = { release: () => Promise<void> | void }
@@ -90,7 +89,28 @@ function cleanTrackName(name: string): string {
 
 export interface MusicStatus { playing: boolean; title: string; source: 'youtube' | 'local' }
 
-export default function MusicPlayer({ profileId, onPlayingChange }: { profileId: string; onPlayingChange?: (m: MusicStatus) => void }) {
+declare global {
+  interface Window {
+    YT?: { Player: new (el: HTMLElement, opts: Record<string, unknown>) => unknown; PlayerState?: { PLAYING: number; PAUSED: number; ENDED: number } }
+    onYouTubeIframeAPIReady?: () => void
+  }
+}
+
+type YTPlayer = {
+  playVideo: () => void
+  pauseVideo: () => void
+  cueVideoById: (id: string) => void
+  cuePlaylist: (opts: { list: string }) => void
+  loadVideoById: (id: string) => void
+  destroy: () => void
+}
+
+export default function MusicPlayer({ profileId, compact, onPlayingChange, onGoTrain }: {
+  profileId: string
+  compact?: boolean
+  onPlayingChange?: (m: MusicStatus) => void
+  onGoTrain?: () => void
+}) {
   const [pref, setPref] = useState(() => getMusicPref(profileId))
   const [playing, setPlaying] = useState(false)
   const [customInput, setCustomInput] = useState(() => getMusicPref(profileId).customUrl)
@@ -99,13 +119,23 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
   const [keepScreenOn, setKeepScreenOn] = useState(true)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
-  // Reproductor local opcional: archivos que el usuario ya tiene en su teléfono.
+  // Reproductor local opcional.
   const [source, setSource] = useState<'youtube' | 'local'>('youtube')
   const [localTracks, setLocalTracks] = useState<LocalTrack[]>([])
   const [localIndex, setLocalIndex] = useState(0)
   const [localPlaying, setLocalPlaying] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Reproductor de YouTube (API oficial). El div del reproductor es
+  // siempre el PRIMER hijo del componente y nunca se desmonta: en modo
+  // compacto solo se hace chiquito, pero sigue visible y sonando.
+  const playerDivRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<YTPlayer | null>(null)
+  const [ytReady, setYtReady] = useState(false)
+  const [ytPlayerReady, setYtPlayerReady] = useState(false)
+  const [ytFailed, setYtFailed] = useState(false)
+  const [ytError, setYtError] = useState('')
 
   const preset = MUSIC_PRESETS.find((p) => p.id === pref.presetId) || MUSIC_PRESETS[MUSIC_PRESETS.length - 1]
   const custom = parseYouTubeUrl(pref.customUrl)
@@ -116,14 +146,95 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
   const anyPlaying = playing || localPlaying
   const statusTitle = source === 'local' && currentLocal ? cleanTrackName(currentLocal.name) : title
 
-  // Avisar arriba (App) para la barrita de música activa.
+  // Avisar arriba (App) para la mini-barra / barrita de actividad.
   useEffect(() => {
     onPlayingChange?.({ playing: anyPlaying, title: statusTitle, source })
   }, [anyPlaying, statusTitle, source, onPlayingChange])
 
-  // Mantener pantalla encendida mientras suena (YouTube o local, si el
-  // navegador lo permite). Fallback silencioso: si no hay Wake Lock,
-  // simplemente no se activa.
+  // Cargar la API de YouTube una sola vez.
+  useEffect(() => {
+    if (window.YT?.Player) { setYtReady(true); return }
+    const prev = window.onYouTubeIframeAPIReady
+    window.onYouTubeIframeAPIReady = () => { prev?.(); setYtReady(true) }
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const s = document.createElement('script')
+      s.src = 'https://www.youtube.com/iframe_api'
+      s.async = true
+      s.onerror = () => setYtFailed(true)
+      document.head.appendChild(s)
+    }
+    const t = setTimeout(() => { if (!window.YT?.Player) setYtFailed(true) }, 10000)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Crear el reproductor de YouTube cuando la API está lista.
+  useEffect(() => {
+    if (!ytReady || ytFailed || playerRef.current || !playerDivRef.current || !window.YT) return
+    try {
+      const player = new window.YT.Player(playerDivRef.current, {
+        width: '100%',
+        height: '100%',
+        videoId: preset.videoId,
+        playerVars: { rel: 0, playsinline: 1 },
+        events: {
+          onReady: () => setYtPlayerReady(true),
+          onStateChange: (e: { data: number }) => {
+            const st = window.YT?.PlayerState
+            if (!st) return
+            if (e.data === st.PLAYING) setPlaying(true)
+            else if (e.data === st.PAUSED || e.data === st.ENDED) setPlaying(false)
+          },
+          onError: (e: { data: number }) => {
+            setPlaying(false)
+            setYtError(e.data === 101 || e.data === 150
+              ? 'Este video no permite verse incrustado. Ábrelo en YouTube con el botón de abajo.'
+              : 'YouTube no pudo reproducir este video aquí. Ábrelo en YouTube con el botón de abajo.')
+          },
+        },
+      }) as unknown as YTPlayer
+      playerRef.current = player
+    } catch {
+      setYtFailed(true)
+    }
+    return () => {
+      try { playerRef.current?.destroy() } catch { /* noop */ }
+      playerRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ytReady, ytFailed])
+
+  // Cargar el video/playlist que toca (preset o link del usuario).
+  useEffect(() => {
+    if (!ytPlayerReady || !playerRef.current || source !== 'youtube') return
+    setYtError('')
+    try {
+      if (custom?.kind === 'playlist') playerRef.current.cuePlaylist({ list: custom.id })
+      else if (custom?.kind === 'video') playerRef.current.cueVideoById(custom.id)
+      else playerRef.current.cueVideoById(preset.videoId)
+      if (playing) playerRef.current.playVideo()
+    } catch {
+      setYtFailed(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ytPlayerReady, preset.id, custom?.kind, custom?.id, source])
+
+  // Play / pausa de YouTube (la API lo controla, sin recargar el iframe).
+  useEffect(() => {
+    if (!ytPlayerReady || !playerRef.current || source !== 'youtube') return
+    try {
+      if (playing) playerRef.current.playVideo()
+      else playerRef.current.pauseVideo()
+    } catch { /* noop */ }
+  }, [playing, ytPlayerReady, source])
+
+  // Al pasar a música local, pausar YouTube.
+  useEffect(() => {
+    if (source === 'local') {
+      try { playerRef.current?.pauseVideo() } catch { /* noop */ }
+    }
+  }, [source])
+
+  // Mantener pantalla encendida mientras suena. Fallback silencioso.
   useEffect(() => {
     if (!anyPlaying || !keepScreenOn) {
       void Promise.resolve(wakeLockRef.current?.release()).catch(() => undefined)
@@ -135,8 +246,6 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
       if (cancelled) { void Promise.resolve(lock?.release()).catch(() => undefined); return }
       wakeLockRef.current = lock
     })
-    // El navegador puede soltar el Wake Lock al cambiar de pestaña:
-    // al volver a la app se pide de nuevo.
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         requestWakeLock().then((lock) => { wakeLockRef.current = lock })
@@ -151,7 +260,7 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
     }
   }, [anyPlaying, keepScreenOn])
 
-  // Media Session (YouTube): título y controles en pantalla de bloqueo.
+  // Media Session (YouTube).
   useEffect(() => {
     if (source !== 'youtube') return
     const ms = navigator.mediaSession
@@ -169,16 +278,13 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
       })
       ms.setActionHandler('play', () => setPlaying(true))
       ms.setActionHandler('pause', () => setPlaying(false))
-    } catch {
-      // Navegador sin Media Session: no pasa nada, la música sigue.
-    }
+    } catch { /* noop */ }
     return () => {
       try { ms.setActionHandler('play', null); ms.setActionHandler('pause', null) } catch { /* noop */ }
     }
   }, [playing, playingTitle, source])
 
-  // Media Session (local): controles en pantalla de bloqueo, con
-  // anterior / siguiente, para el <audio> del teléfono.
+  // Media Session (local).
   useEffect(() => {
     if (source !== 'local') return
     const ms = navigator.mediaSession
@@ -198,9 +304,7 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
       ms.setActionHandler('pause', () => audioRef.current?.pause())
       ms.setActionHandler('previoustrack', () => playLocal((localIndex - 1 + localTracks.length) % localTracks.length))
       ms.setActionHandler('nexttrack', () => playLocal((localIndex + 1) % localTracks.length))
-    } catch {
-      // Navegador sin Media Session: no pasa nada, la música sigue.
-    }
+    } catch { /* noop */ }
     return () => {
       try {
         ms.setActionHandler('play', null); ms.setActionHandler('pause', null)
@@ -259,6 +363,8 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
 
   // Cuando cambia la canción local, el <audio> ya tiene el nuevo src por
   // render; al pasar a playing se reproduce en el efecto de abajo.
+  // El <audio> vive siempre montado (fuera de los condicionales) para
+  // que no se corte al cambiar de pestaña o de modo.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || source !== 'local') return
@@ -267,24 +373,81 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
   }, [localPlaying, localIndex, source, currentLocal])
 
   function switchSource(next: 'youtube' | 'local') {
-    // Cambiar entre YouTube y Local no borra nada: la playlist de
-    // YouTube guardada sigue en el teléfono y la lista local sigue en
-    // esta sesión hasta cerrar la app.
     if (next === 'youtube') setLocalPlaying(false)
     else setPlaying(false)
     setSource(next)
   }
 
+  function togglePlay() {
+    if (source === 'local') setLocalPlaying(!localPlaying)
+    else setPlaying(!playing)
+  }
+
+  // Div del reproductor de YouTube: siempre el mismo nodo, siempre
+  // montado; en compacto se hace chiquito, en la tarjeta se ve grande.
+  const ytPlayer = ytFailed ? (
+    <iframe
+      key={`${useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}-${playing ? 'play' : 'pause'}`}
+      className={compact ? 'h-16 w-28 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'aspect-video w-full'}
+      src={embedSrc(preset, custom, playing)}
+      title={useCustom ? pref.customLabel : `YouTube: ${preset.label}`}
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowFullScreen
+    />
+  ) : (
+    <div
+      ref={playerDivRef}
+      className={compact
+        ? 'h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-slate-900'
+        : source === 'local' ? 'hidden'
+        : 'aspect-video w-full overflow-hidden rounded-xl bg-slate-900'}
+    />
+  )
+
+  // Una sola raíz y el div de YouTube siempre como primer hijo: al
+  // pasar de tarjeta completa a mini-barra (y al revés) React conserva
+  // el mismo nodo DOM y el reproductor NO se recarga ni se corta.
+  // (Dos árboles distintos con early-return lo desmontarían.)
   return (
-    <Card>
-      <button className="flex w-full items-center justify-between text-left" onClick={() => setOpen(!open)}>
-        <h3 className="text-lg font-bold">🎵 Música para entrenar</h3>
-        <span className="text-slate-400">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="mt-3 space-y-3">
+    <div className={compact
+      ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
+      : 'rounded-3xl border border-slate-100 bg-white p-4 shadow-md shadow-night/5'}>
+      {ytPlayer}
+      {compact ? (
+        <>
+          <button
+            onClick={togglePlay}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-lg font-black text-white"
+            aria-label={anyPlaying ? 'Pausar música' : 'Reproducir música'}
+          >
+            {anyPlaying ? '⏸' : '▶'}
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">🎵 {statusTitle}</p>
+            <p className="text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}</p>
+          </div>
+          {source === 'local' && localTracks.length > 1 && (
+            <button
+              onClick={() => playLocal((localIndex + 1) % localTracks.length)}
+              className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+            >
+              ⏭
+            </button>
+          )}
+          <button onClick={onGoTrain} className="shrink-0 rounded-full bg-teal px-3 py-2 text-xs font-bold text-white">
+            Entrenar →
+          </button>
+        </>
+      ) : (
+        <div className="mt-3">
+          <button className="flex w-full items-center justify-between text-left" onClick={() => setOpen(!open)}>
+            <h3 className="text-lg font-bold">🎵 Música para entrenar</h3>
+            <span className="text-slate-400">{open ? '▲' : '▼'}</span>
+          </button>
+          {open && (
+            <div className="mt-3 space-y-3">
           <p className="text-sm text-slate-600">
-            Suena mientras entrenas con la pantalla encendida. Para que suene en segundo plano con la pantalla apagada hace falta YouTube Premium: ábrela en YouTube con el botón de abajo.
+            Suena mientras entrenas y sigue sonando si cambias de pestaña. Para que suene en segundo plano con la pantalla apagada hace falta YouTube Premium: ábrela en YouTube con el botón de abajo.
           </p>
           <p className="rounded-xl bg-amber-50 p-2 text-xs text-amber-800">
             Ojo: de YouTube no se pueden descargar las canciones, YouTube no lo permite. La música local es solo para canciones que tú ya tengas descargadas en tu teléfono: elige tus MP3 abajo y suenan sin subirlos a ningún lado.
@@ -319,16 +482,8 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
                 ))}
               </div>
 
-              <div className="overflow-hidden rounded-xl bg-slate-900">
-                <iframe
-                  key={`${useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}-${playing ? 'play' : 'pause'}`}
-                  className="aspect-video w-full"
-                  src={embedSrc(preset, custom, playing)}
-                  title={useCustom ? pref.customLabel : `YouTube: ${preset.label}`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              </div>
+              {ytPlayer}
+              {ytError && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{ytError}</p>}
 
               <div className="flex items-center gap-2">
                 <Btn variant={playing ? 'ghost' : 'coral'} className="flex-1" onClick={() => setPlaying(!playing)}>
@@ -339,7 +494,7 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
                 </Btn>
               </div>
               <p className="text-xs text-slate-500">
-                {`Sonando: ${title}.`} Con la pantalla encendida y la app abierta, la música sigue mientras entrenas o grabas con GPS. Si bloqueas la pantalla o cambias de app, YouTube web puede pausar: para segundo plano real, abre en YouTube con Premium (o Spotify Premium después).
+                {`Sonando: ${title}.`} Con la pantalla encendida y la app abierta, la música sigue mientras entrenas o grabas con GPS, aunque cambies de pestaña. Si bloqueas la pantalla o cambias de app, YouTube web puede pausar: para segundo plano real, abre en YouTube con Premium (o Spotify Premium después).
               </p>
 
               <Field label="Tu playlist de YouTube (opcional)">
@@ -381,16 +536,6 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
                   <p className="text-xs text-slate-500">
                     {localIndex + 1} de {localTracks.length} · {localPlaying ? 'Sonando…' : 'En pausa'}
                   </p>
-                  <audio
-                    ref={audioRef}
-                    className="w-full"
-                    controls
-                    preload="metadata"
-                    src={currentLocal.url}
-                    onPlay={() => setLocalPlaying(true)}
-                    onPause={() => setLocalPlaying(false)}
-                    onEnded={() => { if (localTracks.length > 1) playLocal((localIndex + 1) % localTracks.length) }}
-                  />
                   <div className="flex gap-2">
                     <Btn variant="ghost" className="flex-1" onClick={() => playLocal((localIndex - 1 + localTracks.length) % localTracks.length)} disabled={localTracks.length < 2}>⏮ Anterior</Btn>
                     <Btn variant={localPlaying ? 'ghost' : 'coral'} className="flex-1" onClick={() => setLocalPlaying(!localPlaying)}>
@@ -442,6 +587,20 @@ export default function MusicPlayer({ profileId, onPlayingChange }: { profileId:
           </div>
         </div>
       )}
-    </Card>
+        </div>
+      )}
+      {/* El <audio> local siempre montado; con controles solo en la
+          tarjeta completa con música local. */}
+      <audio
+        ref={audioRef}
+        className={!compact && source === 'local' && currentLocal ? 'mt-3 w-full' : 'hidden'}
+        controls
+        preload="metadata"
+        src={currentLocal ? currentLocal.url : undefined}
+        onPlay={() => setLocalPlaying(true)}
+        onPause={() => setLocalPlaying(false)}
+        onEnded={() => { if (localTracks.length > 1) playLocal((localIndex + 1) % localTracks.length) }}
+      />
+    </div>
   )
 }

@@ -7,6 +7,7 @@ import ProfileTab from './components/ProfileTab'
 import Search from './components/Search'
 import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
+import MusicPlayer from './components/MusicPlayer'
 import type { TrainActivity } from './components/Train'
 import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
@@ -151,19 +152,35 @@ export default function App() {
             que se estaba grabando y la música. Así el cronómetro, la ruta
             y el reproductor siguen vivos en cualquier pestaña. */}
         <div className={tab === 'entrenar' ? '' : 'hidden'}>
-          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={setActivity} />
+          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => document.getElementById('pulso-music')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
         {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
       </main>
 
-      {/* Barrita de actividad: mientras hay GPS grabando/pausado o música
-          sonando, aparece en cualquier pestaña; al tocarla vuelve a Entrenar. */}
-      {tab !== 'entrenar' && (activity.gps?.active || activity.music?.playing) && (
+      {/* Reproductor de música PERSISTENTE: una sola instancia, siempre
+          montada en App, nunca dentro de una pestaña que se oculte con
+          display:none (eso pausa el iframe de YouTube). En Entrenar se
+          ve la tarjeta completa; en las demás pestañas, la mini-barra
+          fija con el video chiquito pero visible, y el audio sigue.
+          El envoltorio es UNO SOLO y solo cambia de clase, para que
+          React no desmonte el reproductor al cambiar de pestaña. */}
+      <div id="pulso-music" className={tab === 'entrenar' ? 'mx-auto max-w-2xl px-4 pb-4' : 'fixed bottom-[64px] left-0 right-0 z-20 px-3'}>
+        <MusicPlayer
+          profileId={profile.id}
+          compact={tab !== 'entrenar'}
+          onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
+          onGoTrain={() => setTab('entrenar')}
+        />
+      </div>
+
+      {/* Barrita de GPS: solo GPS (la música ya tiene su mini-barra).
+          Va arriba de la mini-barra de música cuando hay grabación. */}
+      {tab !== 'entrenar' && activity.gps?.active && (
         <button
           onClick={() => setTab('entrenar')}
-          className="fixed bottom-[72px] left-0 right-0 z-20 mx-auto flex max-w-2xl items-center justify-between gap-2 px-4"
+          className="fixed bottom-[140px] left-0 right-0 z-20 mx-auto flex max-w-2xl items-center justify-between gap-2 px-4"
         >
           <span className="flex flex-1 items-center gap-2 rounded-full bg-night px-4 py-2.5 text-sm font-bold text-white shadow-xl shadow-night/40">
             {activity.gps?.active && (
@@ -172,17 +189,14 @@ export default function App() {
                 {activity.gps.status === 'paused' ? '⏸ Pausado' : '● Grabando'} {String(Math.floor(activity.gps.seconds / 60)).padStart(2, '0')}:{String(activity.gps.seconds % 60).padStart(2, '0')} · {activity.gps.distanceKm.toFixed(2)} km
               </span>
             )}
-            {activity.music?.playing && (
-              <span className="truncate">🎵 {activity.music.title}</span>
-            )}
             <span className="ml-auto shrink-0 text-teal">Volver →</span>
           </span>
         </button>
       )}
 
-      {/* Botón flotante para crear sesión */}
+      {/* Botón flotante para crear sesión (sube cuando hay barras fijas). */}
       <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
-        className="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40">
+        className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${tab === 'entrenar' ? 'bottom-20' : activity.gps?.active ? 'bottom-48' : 'bottom-40'}`}>
         +
       </button>
 
