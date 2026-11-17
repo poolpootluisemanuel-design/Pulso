@@ -5,6 +5,7 @@ import { deleteWorkout, logWorkout } from '../lib/store'
 import { formatDate, paceMinKm, todayISO } from '../lib/utils'
 import GpsTracker, { GPS_SAVED_KEY } from './GpsTracker'
 import type { GpsProgress } from './GpsTracker'
+import type { RecommendedRoute } from '../lib/routes'
 import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
@@ -28,13 +29,18 @@ function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; 
 
 export interface TrainActivity { gps: GpsProgress | null; music: MusicStatus | null }
 
-export default function Train({ profile, workouts, onRefresh, onActivity, onShowMusic }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void }) {
+export default function Train({ profile, workouts, onRefresh, onActivity, onShowMusic, guideRoute, onGuideDone }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void; guideRoute?: RecommendedRoute | null; onGuideDone?: () => void }) {
   // Si hay una grabación GPS guardada sin terminar, abrir el GPS directo
   // para que Luis la vea y pueda reanudarla, en vez de esconderla detrás
   // del botón "Grabar con GPS".
   const [showGps, setShowGps] = useState(() => {
     try { return localStorage.getItem(GPS_SAVED_KEY) !== null } catch { return false }
   })
+  // "Recorrer esta ruta": al elegir una ruta recomendada en Sesiones →
+  // Mapa, Entrenar abre el GPS solo, con la ruta como guía teal.
+  useEffect(() => {
+    if (guideRoute) setShowGps(true)
+  }, [guideRoute])
   const [gps, setGps] = useState<GpsProgress | null>(null)
 
   // La música ya no vive aquí: el reproductor está montado en App.tsx
@@ -82,11 +88,14 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
       {showGps ? (
         <GpsTracker
           onProgress={setGps}
-          onCancel={() => setShowGps(false)}
+          onCancel={() => { setShowGps(false); onGuideDone?.() }}
+          guide={guideRoute}
+          onClearGuide={() => onGuideDone?.()}
           onSave={async (r) => {
             await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
             setShowGps(false)
             setMsg('Entrenamiento con GPS guardado.')
+            onGuideDone?.()
             onRefresh()
           }}
         />

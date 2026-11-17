@@ -11,6 +11,7 @@ import MusicPlayer from './components/MusicPlayer'
 import type { TrainActivity } from './components/Train'
 import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
+import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
 
 type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil'
@@ -53,6 +54,9 @@ export default function App() {
   // y que Luis toque Actualizar (skipWaiting + recarga) en vez de
   // tener que borrar el caché para ver cada ajuste.
   const [updateAvailable, setUpdateAvailable] = useState(false)
+  // Ruta recomendada elegida en Sesiones → Mapa → "Recorrer esta
+  // ruta": Entrenar abre el GPS con esa ruta como guía teal.
+  const [guideRoute, setGuideRoute] = useState<RecommendedRoute | null>(null)
   useEffect(() => {
     const onUpdate = () => setUpdateAvailable(true)
     window.addEventListener('pulso-sw-update', onUpdate)
@@ -241,13 +245,13 @@ export default function App() {
       <main className="mx-auto max-w-2xl px-4 pb-40 pt-4">
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} />}
+        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} onRunRoute={(r) => { setGuideRoute(r); setTab('entrenar') }} />}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
             y el reproductor siguen vivos en cualquier pestaña. */}
         <div className={tab === 'entrenar' ? '' : 'hidden'}>
-          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} />
+          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}

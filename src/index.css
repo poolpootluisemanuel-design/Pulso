@@ -5,11 +5,20 @@
 body { background: #f0f4f9; color: #0a1b2e; }
 input, select, textarea { font-size: 16px; }
 
-/* El mapa de Leaflet vive dentro de su propio contenedor: sus controles
-   no deben tapar el encabezado ni la navegación de la app. */
+/* El mapa vive dentro de su propio contenedor: sus controles no deben
+   tapar el encabezado ni la navegación de la app. */
 .pulso-map { position: relative; z-index: 0; }
-.pulso-map .leaflet-container { font-family: inherit; background: #e6edf5; }
-.pulso-map .leaflet-control-attribution { font-size: 10px; }
+.pulso-map .maplibregl-canvas { background: #0A1B2E; }
+/* Controles y popups de MapLibre con la paleta PULSO (azul noche, no
+   el gris claro por defecto): el mapa claro se veía viejo. */
+.pulso-map .maplibregl-ctrl-group { background: #0A1B2E; box-shadow: 0 2px 8px rgba(10,27,46,.4); }
+.pulso-map .maplibregl-ctrl-group button { background: #0A1B2E; color: #fff; }
+.pulso-map .maplibregl-ctrl-group button:hover { background: #E63946; }
+.pulso-map .maplibregl-ctrl-attrib { background: rgba(10,27,46,.75); color: rgba(255,255,255,.7); font-size: 10px; }
+.pulso-map .maplibregl-ctrl-attrib a { color: #14B8A6; }
+.pulso-map .maplibregl-popup-content { background: #0A1B2E; color: #fff; border-radius: 12px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(10,27,46,.5); }
+.pulso-map .maplibregl-popup-tip { border-top-color: #0A1B2E; }
+.pulso-map .maplibregl-popup-close-button { color: #fff; }
 
 @keyframes pulso-line {
   0% { transform: translateX(-100%); }

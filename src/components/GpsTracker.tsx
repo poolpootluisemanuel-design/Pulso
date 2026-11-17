@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { haversineKm, paceMinKm } from '../lib/utils'
+import type { RecommendedRoute } from '../lib/routes'
 import { Btn, Card } from './ui'
-import MapView from './MapView'
+// El mapa (MapLibre, ~1 MB) solo se descarga cuando se muestra uno,
+// no en la primera carga de la app: Entrenar abre sin esperarlo.
+const MapView = lazy(() => import('./MapView'))
 
 interface Point { lat: number; lng: number }
 
@@ -37,8 +40,10 @@ export { GPS_SAVED_KEY }
  *  sin permiso, muestra el mensaje y no graba.
  *  La grabación en curso se guarda en localStorage mientras graba, así
  *  sobrevive al cambiar de pestaña (Train ya no se desmonta) y a recargar:
- *  al volver queda en pausa, lista para reanudar donde iba. */
-export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void }) {
+ *  al volver queda en pausa, lista para reanudar donde iba.
+ *  Con `guide` (ruta recomendada elegida en Sesiones → Mapa), la ruta
+ *  se dibuja como línea teal punteada de referencia mientras grabas. */
+export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClearGuide }: { onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void; guide?: RecommendedRoute | null; onClearGuide?: () => void }) {
   const savedRef = useRef<SavedGps | null>(null)
   if (savedRef.current === null) savedRef.current = loadSavedGps()
   const saved = savedRef.current
@@ -245,33 +250,49 @@ export default function GpsTracker({ onSave, onCancel, onProgress }: { onSave: (
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
   const ss = String(seconds % 60).padStart(2, '0')
 
-  // Mapa real de la ruta (Leaflet + OpenStreetMap): la ruta se dibuja
-  // en vivo, el mapa sigue tu posición. Sin internet no carga las
-  // calles, pero la ruta y la distancia con GPS sí se siguen grabando.
-  // El SVG viejo se quitó: el mapa real lo reemplaza en vivo y en el
-  // resumen. Marcadores: inicio verde, posición actual roja.
+  // Mapa real de la ruta (MapLibre oscuro, 3D): la ruta se dibuja en
+  // vivo en rojo pulso, el mapa sigue tu posición. Sin internet no
+  // cargan las calles, pero la ruta y la distancia con GPS sí se
+  // siguen grabando. Marcadores: inicio teal, posición actual roja.
+  // Si vienes de una ruta recomendada, su trazado sale en teal
+  // punteado como guía para seguirlo.
   const routeMarkers = points.length > 0 ? [
-    { key: 'inicio', lat: points[0].lat, lng: points[0].lng, emoji: '🟢', color: '#22c55e', popupHtml: '<b>Inicio</b>' },
+    { key: 'inicio', lat: points[0].lat, lng: points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
     ...(points.length > 1 ? [{ key: 'ahora', lat: points[points.length - 1].lat, lng: points[points.length - 1].lng, emoji: '📍', color: '#E63946', popupHtml: '<b>Estás aquí</b>' }] : []),
   ] : []
   const routeMap = (
-    <MapView
-      center={points.length > 0 ? points[points.length - 1] : undefined}
-      points={points}
-      markers={routeMarkers}
-      height={220}
-      follow
-      offlineNote="📶 Sin internet: el mapa no carga las calles, pero tu ruta se sigue grabando con GPS."
-    />
+    <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 260 }}>Cargando mapa…</div>}>
+      <MapView
+        center={points.length > 0 ? points[points.length - 1] : guide ? guide.points[0] : undefined}
+        points={points}
+        guidePoints={guide?.points}
+        markers={routeMarkers}
+        height={260}
+        follow
+        offlineNote="📶 Sin internet: el mapa no carga las calles, pero tu ruta se sigue grabando con GPS."
+      />
+    </Suspense>
   )
 
   return (
     <Card>
       <h3 className="text-lg font-bold">Grabar con GPS</h3>
       <p className="mb-3 text-sm text-slate-500">Caminata, correr o ciclismo. Se guarda tu ruta, distancia y ritmo.</p>
+      {guide && (
+        <p className="mb-3 flex items-center justify-between gap-2 rounded-xl bg-teal/10 p-2 text-sm font-semibold text-teal-dark">
+          <span>🗺️ Siguiendo ruta: {guide.name} — sigue la línea teal punteada.</span>
+          {onClearGuide && <button className="shrink-0 text-xs underline" onClick={onClearGuide}>Quitar guía</button>}
+        </p>
+      )}
 
       {status === 'idle' && (
         <div className="space-y-3">
+          {guide && (
+            <div>
+              {routeMap}
+              <p className="mt-1 text-center text-xs text-slate-500">La línea teal es la ruta recomendada. Tu recorrido se dibuja en rojo encima.</p>
+            </div>
+          )}
           <div className="flex gap-2">
             {['Caminata', 'Correr', 'Ciclismo'].map((s) => (
               <button key={s} onClick={() => setSport(s)}
