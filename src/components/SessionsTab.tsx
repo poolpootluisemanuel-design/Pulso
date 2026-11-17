@@ -14,6 +14,8 @@ import type { MapMarker } from './MapView'
 import RecommendedRoutes from './RecommendedRoutes'
 import { RECOMMENDED_ROUTES, routesSortedByZone, zoneCenter } from '../lib/routes'
 import type { RecommendedRoute } from '../lib/routes'
+import { isNative } from '../lib/native'
+import { getNativeCurrentPosition } from '../lib/nativeGps'
 
 const SPORT_EMOJI: Record<string, string> = {
   running: '🏃', caminata: '🚶', pádel: '🎾', padel: '🎾', crossfit: '💪',
@@ -59,6 +61,33 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
   // Centro del mapa: GPS del usuario si ya dio permiso, si no su zona
   // (Isla Mujeres si es su zona), nunca siempre Cancún centro.
   const [gpsCenter, setGpsCenter] = useState<{ lat: number; lng: number } | null>(null)
+  // Estado de la ubicación pedida a mano (botón de rutas cercanas).
+  const [locState, setLocState] = useState<'idle' | 'loading' | 'denied' | 'unavailable'>('idle')
+
+  // Pide la ubicación actual una sola vez (botón "Mostrar las más
+  // cercanas a mí" en Rutas): en nativo con Capacitor, en web con el
+  // navegador. Sirve para ordenar las rutas por cercanía y para el
+  // marcador "Estás aquí" en el mapa.
+  function requestUserPosition() {
+    setLocState('loading')
+    if (isNative()) {
+      void getNativeCurrentPosition().then((p) => {
+        if (!p) { setLocState('denied'); return }
+        setGpsCenter({ lat: p.lat, lng: p.lng })
+        setLocState('idle')
+      })
+      return
+    }
+    if (!('geolocation' in navigator)) { setLocState('unavailable'); return }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setLocState('idle')
+      },
+      () => setLocState('denied'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
 
   // Al abrir el mapa, intenta centrar en el GPS si el permiso ya está
   // concedido (sin preguntar de nuevo); si no, centra en su zona.
@@ -147,6 +176,12 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
   const mapCenter = withCoords.length > 0
     ? { lat: withCoords[0].lat as number, lng: withCoords[0].lng as number }
     : gpsCenter || zoneCenter(profile.zone)
+  // Marcador "Estás aquí": tu ubicación actual, si se conoce (al
+  // abrir el mapa con permiso, o con el botón de rutas cercanas).
+  // Así se ve en el mapa si estás lejos del inicio de una ruta.
+  const youMarker: MapMarker[] = gpsCenter ? [
+    { key: 'yo', lat: gpsCenter.lat, lng: gpsCenter.lng, emoji: '🧍', color: '#0A1B2E', popupHtml: '<b>Estás aquí</b>' },
+  ] : []
   // En Isla Mujeres el mapa oscuro es casi todo mar gris: allí el
   // mapa arranca en satélite (se ve la isla real). El usuario puede
   // cambiarlo con el selector y su elección se guarda.
@@ -233,7 +268,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
             <>
               <LiveTrainingLayer trainers={liveTrainers} visible={showLive} onToggle={setShowLive} selfProfileId={profile.id} />
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                <MapView center={mapCenter} markers={[...markers, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
               </Suspense>
               <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
             </>
@@ -250,6 +285,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                     markers={[
                       { key: 'r-inicio', lat: selectedRoute.points[0].lat, lng: selectedRoute.points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
                       { key: 'r-fin', lat: selectedRoute.points[selectedRoute.points.length - 1].lat, lng: selectedRoute.points[selectedRoute.points.length - 1].lng, emoji: '🏁', color: '#E63946', popupHtml: '<b>Fin</b>' },
+                      ...youMarker,
                     ]}
                     height={320}
                     offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles."
@@ -261,6 +297,9 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                 onSelect={setSelectedRoute}
                 onRun={(r) => onRunRoute?.(r)}
                 userZone={profile.zone}
+                userPosition={gpsCenter}
+                onRequestLocation={requestUserPosition}
+                locState={locState}
               />
             </>
           )}

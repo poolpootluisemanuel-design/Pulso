@@ -6,6 +6,7 @@ import { routeDistanceKm } from '../lib/routes'
 import { isNative } from '../lib/native'
 import { getNativeCurrentPosition, startNativeWatch, stopNativeWatch } from '../lib/nativeGps'
 import { getTodaySteps, healthAvailable, openHealthConnectSettings, requestStepsAccess } from '../lib/healthConnect'
+import { getStepCount, requestStepPermission, startStepCounting, stepCounterSupported, stopStepCounting } from '../lib/stepCounter'
 import { Btn, Card } from './ui'
 import LiveTrainingToggle from './LiveTrainingToggle'
 import type { Profile } from '../lib/types'
@@ -20,9 +21,9 @@ export interface GpsResult {
   durationMin: number
   distanceKm: number
   route: Point[]
-  /** Pasos contados con el sensor de movimiento durante la grabación
-   *  (solo con la app abierta; en web no se cuentan en segundo plano
-   *  ni con el móvil apagado). */
+  /** Pasos contados durante la grabación. En la app nativa vienen del
+   *  contador del sistema (TYPE_STEP_COUNTER, preciso) o de Health
+   *  Connect; en web son un estimado del sensor de movimiento. */
   steps?: number
 }
 
@@ -70,7 +71,26 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   // app al cerrarla y con el móvil apagado ningún sensor cuenta nada:
   // eso es honesto y se dice en pantalla; el conteo en segundo plano
   // llega con la app nativa (Health Connect).
+  // FUENTE DE PASOS (en orden, solo en la app nativa de Android):
+  //   'system'  = contador del sistema (TYPE_STEP_COUNTER, plugin
+  //               StepCounter): preciso, sigue contando con la
+  //               pantalla apagada; al volver se lee el delta.
+  //   'health'  = Health Connect: delta de los pasos de hoy entre el
+  //               inicio y ahora (Samsung Health / Google Fit).
+  //   'estimate'= estimación por picos de aceleración (DeviceMotion),
+  //               solo con la app abierta; es la única en web.
   const [stepsOn, setStepsOn] = useState(true)
+  const [stepsSource, setStepsSource] = useState<'system' | 'health' | 'estimate'>(() => (stepCounterSupported() ? 'system' : 'estimate'))
+  const stepsSourceRef = useRef<'system' | 'health' | 'estimate'>(stepCounterSupported() ? 'system' : 'estimate')
+  const stepPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Pasos ya contados antes de la sesión de conteo actual (al reanudar,
+  // el contador nativo arranca de cero y se suma este offset).
+  const stepsOffsetRef = useRef(0)
+  const hcBaselineRef = useRef<number | null>(null)
+  function setStepsSourceBoth(v: 'system' | 'health' | 'estimate') {
+    stepsSourceRef.current = v
+    setStepsSource(v)
+  }
   const [stepsState, setStepsState] = useState<'idle' | 'counting' | 'unsupported' | 'denied'>('idle')
   const stepsRef = useRef(saved?.steps || 0)
   const lastStepAtRef = useRef(0)
@@ -162,8 +182,11 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   // de ~11 m/s² (la gravedad en reposo es ~9.8); se cuenta un paso por
   // cada cruce ascendente, con mínimo 300 ms entre pasos para no contar
   // el mismo paso dos veces. Es un estimado, no el podómetro del sistema.
+  // SOLO se usa cuando stepsSource es 'estimate': en la app nativa el
+  // contador del sistema (o Health Connect) manda y este listener ni
+  // se registra.
   useEffect(() => {
-    if (status !== 'recording' || !stepsOn || sport === 'Ciclismo') return
+    if (status !== 'recording' || !stepsOn || sport === 'Ciclismo' || stepsSource !== 'estimate') return
     if (motionGrantedRef.current === false) { setStepsState('denied'); return }
     if (typeof DeviceMotionEvent === 'undefined') { setStepsState('unsupported'); return }
     setStepsState('counting')
@@ -196,7 +219,60 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
       window.removeEventListener('devicemotion', onMotion)
       clearTimeout(t)
     }
-  }, [status, stepsOn, sport])
+  }, [status, stepsOn, sport, stepsSource])
+
+  // Sesión de conteo de pasos (app nativa): contador del sistema
+  // primero, Health Connect después, estimación si no hay ninguno.
+  // Al reanudar, el contador arranca de cero y se suma lo ya contado.
+  function stopStepSession() {
+    if (stepPollRef.current !== null) { clearInterval(stepPollRef.current); stepPollRef.current = null }
+    if (stepsSourceRef.current === 'system') void stopStepCounting()
+  }
+
+  async function initStepSession() {
+    stopStepSession()
+    if (!stepsOn || sport === 'Ciclismo') return
+    stepsOffsetRef.current = stepsRef.current
+    setStepsState('counting')
+    // 1) Contador del sistema (preciso, sigue con pantalla apagada).
+    if (stepCounterSupported()) {
+      const granted = await requestStepPermission()
+      if (granted && (await startStepCounting())) {
+        setStepsSourceBoth('system')
+        stepPollRef.current = setInterval(() => {
+          void getStepCount().then((n) => {
+            if (n === null) return
+            const total = stepsOffsetRef.current + n
+            stepsRef.current = total
+            setSteps(total)
+          })
+        }, 2000)
+        return
+      }
+    }
+    // 2) Health Connect: delta de los pasos de hoy (respaldo).
+    try {
+      const avail = await healthAvailable()
+      if (avail.available && (await requestStepsAccess())) {
+        const base = await getTodaySteps()
+        if (base !== null) {
+          hcBaselineRef.current = base
+          setStepsSourceBoth('health')
+          stepPollRef.current = setInterval(() => {
+            void getTodaySteps().then((today) => {
+              if (today === null || hcBaselineRef.current === null) return
+              const total = stepsOffsetRef.current + Math.max(0, today - hcBaselineRef.current)
+              stepsRef.current = total
+              setSteps(total)
+            })
+          }, 15000)
+          return
+        }
+      }
+    } catch { /* sin Health Connect: cae a la estimación */ }
+    // 3) Estimación por aceleración (única opción en web).
+    setStepsSourceBoth('estimate')
+  }
 
   // Guardar el progreso mientras graba / en pausa: sobrevive a recargar.
   // Al terminar, guardar o descartar se borra.
@@ -233,6 +309,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   }, [status])
 
   useEffect(() => () => {
+    stopStepSession()
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
     if (nativeWatcherId.current !== null) void stopNativeWatch(nativeWatcherId.current)
   }, [])
@@ -365,6 +442,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     // Antes la pausa solo cambiaba el texto: el watch seguía sumando
     // distancia. Ahora sí se detiene el GPS hasta reanudar.
     stopWatch()
+    stopStepSession()
     setStatus('paused')
   }
 
@@ -415,6 +493,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
         setCurrentPos(p)
         setStatus('recording')
         startWatch(p)
+        void initStepSession()
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
     )
@@ -431,6 +510,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
         setCurrentPos(p)
         setStatus('recording')
         startWatch(p)
+        void initStepSession()
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
     )
@@ -438,6 +518,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
 
   function finish() {
     stopWatch()
+    stopStepSession()
     setStatus('done')
   }
 
@@ -519,7 +600,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
           {sport !== 'Ciclismo' && (
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={stepsOn} onChange={(e) => setStepsOn(e.target.checked)} />
-              👣 Contar mis pasos con el sensor del teléfono
+              {isNative() ? '👣 Contar mis pasos (contador del sistema)' : '👣 Contar mis pasos con el sensor del teléfono'}
             </label>
           )}
           {isNative() ? (
@@ -596,7 +677,9 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
             <div className="rounded-xl bg-sage-50 p-2 text-center">
               <p className="text-xl font-black tabular-nums">👣 {steps.toLocaleString('es-MX')} pasos</p>
               <p className="text-xs text-slate-500">
-                {stepsState === 'counting' ? 'Contando con el sensor · estimado, solo con la app abierta'
+                {stepsSource === 'system' ? 'Pasos del sistema · contador del teléfono, sigue aunque apagues la pantalla'
+                  : stepsSource === 'health' ? 'Pasos de Health Connect · del sistema, se actualiza cada poco'
+                  : stepsState === 'counting' ? 'Contando con el sensor · estimado, solo con la app abierta'
                   : stepsState === 'denied' ? 'No diste permiso al sensor: el GPS sigue normal, sin pasos.'
                   : stepsState === 'unsupported' ? 'Tu navegador no da el sensor de pasos: el GPS sigue normal.'
                   : stepsOn ? 'Contador de pasos activado' : 'Contador de pasos apagado'}

@@ -17,8 +17,24 @@ lee la carpeta `dist` que genera `npm run build`.
 - **Pasos con Health Connect**: plugin `@capgo/capacitor-health` (v8.13.0).
   En la app instalada, Entrenar → Grabar con GPS tiene el botón
   "Ver mis pasos" que lee los pasos de hoy de Health Connect (donde
-  Samsung Health y Google Fit juntan sus datos). El conteo de pasos en
-  vivo mientras grabas sigue usando el sensor del teléfono.
+  Samsung Health y Google Fit juntan sus datos).
+- **Pasos precisos al grabar (app nativa)**: plugin propio
+  `StepCounter` (`android/app/src/main/java/com/pulso/app/
+  StepCounterPlugin.java`, sensor TYPE_STEP_COUNTER del sistema, con
+  permiso ACTIVITY_RECOGNITION). Es la fuente principal mientras se
+  graba: es precisa y sigue contando con la pantalla apagada (al
+  volver se lee el delta acumulado). Si el teléfono no tiene ese
+  sensor o no hay permiso, cae a Health Connect (delta de los pasos
+  de hoy) y, si tampoco hay, a la estimación por aceleración
+  (DeviceMotion), que es la única que existe en web. La pantalla dice
+  de dónde viene el conteo ("Pasos del sistema" / "Health Connect" /
+  "estimado").
+- **Mapa que se recupera al encender la pantalla**: MapView distingue
+  la pérdida transitoria de contexto WebGL (apagar/encender suspende
+  la WebView) de WebGL realmente no soportado. Al perder el contexto
+  muestra "Recuperando el mapa…" y al volver a primer plano lo
+  re-inicializa con la ruta y la posición actuales; la grabación GPS
+  no se toca (vive fuera del mapa).
 - **Permisos declarados** en `android/app/src/main/AndroidManifest.xml`:
   ubicación precisa, ubicación en segundo plano (`ACCESS_BACKGROUND_LOCATION`),
   reconocimiento de actividad (pasos) e historial de salud. El servicio

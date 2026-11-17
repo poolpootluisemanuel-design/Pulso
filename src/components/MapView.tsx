@@ -154,6 +154,18 @@ export default function MapView({
   const [online, setOnline] = useState(() => navigator.onLine)
   const [is3d, setIs3d] = useState(false)
   const [webglFailed, setWebglFailed] = useState(false)
+  // Pérdida de contexto WebGL al apagar/encender la pantalla: Android
+  // suspende la WebView y el canvas pierde su contexto. ANTES este
+  // evento ponía el mensaje permanente "no soporta el mapa 3D" y el
+  // mapa quedaba en negro aunque el GPS siguiera grabando. Ahora se
+  // distingue: pérdida transitoria (contextLost, se recupera) de
+  // WebGL realmente no soportado (webglFailed, mensaje permanente).
+  const [contextLost, setContextLost] = useState(false)
+  const contextLostRef = useRef(false)
+  // Forzar recreación del mapa (remontar): se usa cuando el contexto
+  // se perdió y no se restauró solo al volver a primer plano.
+  const [mapKey, setMapKey] = useState(0)
+  const recreateTriedRef = useRef(false)
   const [basemap, setBasemap] = useState<Basemap>(() => {
     try {
       const saved = localStorage.getItem(BASEMAP_KEY)
@@ -181,7 +193,8 @@ export default function MapView({
     }
   }, [])
 
-  // Crear el mapa una sola vez.
+  // Crear el mapa una sola vez (o de nuevo si se fuerza con mapKey
+  // tras una pérdida de contexto WebGL que no se restauró sola).
   useEffect(() => {
     const el = containerRef.current
     if (!el || mapRef.current) return
@@ -201,12 +214,39 @@ export default function MapView({
         touchZoomRotate: true,
       })
     } catch {
-      // Sin WebGL (navegador muy viejo): no se rompe la pantalla, se
-      // muestra el aviso y la ruta se sigue grabando igual.
-      setWebglFailed(true)
+      // No se pudo crear el mapa: si este dispositivo ni siquiera
+      // tiene WebGL, mensaje permanente; si no, puede ser un contexto
+      // perdido transitorio y se reintenta una vez al segundo.
+      const probe = document.createElement('canvas')
+      const hasGl = !!(probe.getContext('webgl') || probe.getContext('webgl2'))
+      if (!hasGl) {
+        setWebglFailed(true)
+      } else if (!recreateTriedRef.current) {
+        recreateTriedRef.current = true
+        setTimeout(() => setMapKey((k) => k + 1), 1000)
+      } else {
+        setWebglFailed(true)
+      }
       return
     }
-    map.on('webglcontextlost', () => setWebglFailed(true))
+    // Pérdida de contexto WebGL (apagar/encender la pantalla en
+    // Android): preventDefault() permite que el navegador lo restaure;
+    // mientras, solo se muestra "Recuperando el mapa…", sin tirar el
+    // mensaje de "no soporta 3D" ni tocar la grabación (el GPS vive
+    // en GpsTracker, fuera de este componente).
+    map.on('webglcontextlost', (e) => {
+      // preventDefault() permite que el navegador restaure el
+      // contexto; en los tipos de MapLibre viene en originalEvent.
+      const ev = e as unknown as { preventDefault?: () => void; originalEvent?: { preventDefault?: () => void } }
+      try { ev.preventDefault?.(); ev.originalEvent?.preventDefault?.() } catch { /* noop */ }
+      contextLostRef.current = true
+      setContextLost(true)
+    })
+    map.on('webglcontextrestored', () => {
+      contextLostRef.current = false
+      setContextLost(false)
+      try { map.resize() } catch { /* noop */ }
+    })
     // Capas propias (ruta roja + guía teal): setStyle las borra, así
     // que se vuelven a poner en cada carga de estilo.
     const addRouteLayers = () => {
@@ -240,9 +280,42 @@ export default function MapView({
       map.remove()
       mapRef.current = null
       markersRef.current = []
+      fittedRef.current = ''
     }
-    // Solo al montar: el centro inicial no se re-aplica después.
+    // Al montar y al forzar recreación (mapKey): el centro inicial no
+    // se re-aplica después salvo al recrear.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapKey])
+
+  // Al volver a primer plano (encender la pantalla, volver a la app):
+  // el mapa puede haber perdido su tamaño o su contexto WebGL.
+  // resize() basta en el caso normal; si el contexto se perdió y no
+  // se restauró solo, se recrea el mapa entero con la ruta y la
+  // posición actuales (pointsRef/guideRef siempre están al día), sin
+  // tocar la grabación GPS, que vive fuera de este componente.
+  // Sin @capacitor/app instalado: visibilitychange + focus cubren el
+  // regreso a primer plano en la WebView de Android.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const map = mapRef.current
+      if (map) {
+        try { map.resize() } catch { /* noop */ }
+      }
+      if (contextLostRef.current) {
+        contextLostRef.current = false
+        setContextLost(false)
+        setMapKey((k) => k + 1)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    window.addEventListener('pageshow', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      window.removeEventListener('pageshow', onVisible)
+    }
   }, [])
 
   // Ruta grabada + guía: se actualizan sin recrear el mapa. Con follow,
@@ -344,6 +417,11 @@ export default function MapView({
       )}
       <div className="pulso-map relative w-full overflow-hidden rounded-2xl border border-night/20 shadow-md shadow-night/20" style={{ height }}>
         <div ref={containerRef} className="h-full w-full" style={{ background: '#0A1B2E' }} />
+        {contextLost && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-night/80 p-4 text-center text-sm font-semibold text-white">
+            🔄 Recuperando el mapa… tu ruta se sigue grabando con GPS.
+          </div>
+        )}
         {/* Fondo del mapa: Oscuro o Satélite. En Isla Mujeres el
             satélite es el default: en oscuro la isla es casi todo mar. */}
         <div className="absolute left-2 top-2 z-10 flex gap-1.5">

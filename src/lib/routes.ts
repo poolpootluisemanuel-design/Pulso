@@ -54,6 +54,24 @@ export function routesSortedByZone(zone: string): RecommendedRoute[] {
   return [...mine, ...rest]
 }
 
+/** Punto de inicio de una ruta (su primer punto). */
+export function routeStartPoint(route: RecommendedRoute): RoutePoint {
+  return route.points[0]
+}
+
+/** Distancia en línea recta desde tu ubicación hasta el INICIO de la
+ *  ruta (no hasta su punto más cercano: lo que importa es cuánto te
+ *  falta para llegar a donde empieza). */
+export function distanceToRouteStartKm(from: RoutePoint, route: RecommendedRoute): number {
+  return haversineKm(from, route.points[0])
+}
+
+/** Rutas ordenadas por cercanía a tu ubicación: el inicio más cercano
+ *  primero. Sin ubicación se usa routesSortedByZone (por zona). */
+export function routesSortedByDistance(from: RoutePoint): RecommendedRoute[] {
+  return [...RECOMMENDED_ROUTES].sort((a, b) => distanceToRouteStartKm(from, a) - distanceToRouteStartKm(from, b))
+}
+
 export function routeDistanceKm(route: RecommendedRoute): number {
   let total = 0
   for (let i = 1; i < route.points.length; i++) total += haversineKm(route.points[i - 1], route.points[i])
