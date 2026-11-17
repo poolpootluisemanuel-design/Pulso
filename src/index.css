@@ -5,6 +5,35 @@
 body { background: #f0f4f9; color: #0a1b2e; }
 input, select, textarea { font-size: 16px; }
 
+/* Layout fijo inferior + safe-area (Android 15 edge-to-edge: la
+   WebView queda debajo de la barra de estado y de la barra de gestos).
+   Alturas FIJAS para que nada se solape: navegación 64 px, mini-barra
+   de música 64 px, barrita de GPS 52 px. La mini-barra va ENCIMA de la
+   navegación (bottom = altura del nav + safe-area), el contenido
+   reserva ese espacio con padding inferior, y el botón + va encima de
+   todo eso. Sin estas medidas fijas, la barra de música tapaba la
+   navegación y el texto final de cada pestaña. */
+:root {
+  --pulso-nav-h: 64px;
+  --pulso-music-h: 64px;
+  --pulso-gps-h: 52px;
+}
+/* Encabezado: nunca debajo de la barra de estado del teléfono. */
+.pulso-header { padding-top: max(12px, env(safe-area-inset-top, 0px)); }
+/* Navegación inferior: altura fija, con la barra de gestos abajo. */
+.pulso-nav { height: calc(var(--pulso-nav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* Contenido: espacio libre para nav + música (+ barrita GPS si graba). */
+.pulso-main { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 24px); }
+.pulso-main-gps { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 24px); }
+/* Muelle de música: siempre encima de la navegación, nunca sobre ella. */
+.pulso-music-dock { bottom: calc(var(--pulso-nav-h) + env(safe-area-inset-bottom, 0px)); }
+/* Botón flotante +: encima de nav + música (+ GPS si graba). */
+.pulso-fab { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 16px); }
+.pulso-fab-gps { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 16px); }
+/* Hojas flotantes (tutorial / permisos): se anclan encima del muelle
+   de música y dejan la navegación y la música visibles y sin tapar. */
+.pulso-sheet-bottom { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 12px); }
+
 /* El mapa vive dentro de su propio contenedor: sus controles no deben
    tapar el encabezado ni la navegación de la app. */
 .pulso-map { position: relative; z-index: 0; }

@@ -3,9 +3,10 @@ import type { AuthUser, Profile } from '../lib/types'
 import { DAYS, LEVELS, SPORTS, ZONES } from '../lib/types'
 import { changePassword, saveProfile, signOut } from '../lib/store'
 import { detectZone } from '../lib/utils'
+import { isNative } from '../lib/native'
 import { Btn, Card, Field, inputCls, selectCls } from './ui'
 
-export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { user: AuthUser; profile: Profile; onRefresh: () => void; onSignOut: () => void }) {
+export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShowTutorial, onShowPermissions }: { user: AuthUser; profile: Profile; onRefresh: () => void; onSignOut: () => void; onShowTutorial?: () => void; onShowPermissions?: () => void }) {
   const [name, setName] = useState(profile.name)
   const [zone, setZone] = useState(profile.zone)
   const [bio, setBio] = useState(profile.bio)
@@ -161,6 +162,19 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut }: { us
             <Btn type="submit" variant="teal">Cambiar contraseña</Btn>
           </form>
         )}
+      </Card>
+
+      <Card>
+        <p className="mb-2 font-black text-night">Ayuda</p>
+        <div className="space-y-2">
+          <Btn variant="teal" className="w-full" onClick={() => onShowTutorial?.()}>📖 Ver tutorial</Btn>
+          {isNative() && (
+            <Btn variant="ghost" className="w-full" onClick={() => onShowPermissions?.()}>🔐 Dar todos los permisos</Btn>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          El tutorial y los permisos solo salen solos la primera vez; desde aquí los puedes volver a abrir cuando quieras.
+        </p>
       </Card>
 
       <Btn variant="ghost" className="w-full" onClick={async () => { await signOut(); onSignOut() }}>Cerrar sesión</Btn>

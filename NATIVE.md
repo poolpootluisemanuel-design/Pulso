@@ -176,3 +176,36 @@ live. La primera compilación en Android Studio puede pedir ajustes
   la pantalla apagada mucho tiempo: para sonido garantizado haría falta
   un reproductor nativo con foreground service, que no está implementado.
   YouTube en nativo tampoco suena con la pantalla apagada sin Premium.
+
+## Tutorial y permisos al primer inicio (app nativa)
+
+- **Mini tutorial** (`src/components/Tutorial.tsx`): 4 tarjetas, una
+  frase corta por paso, menos de 30 segundos. Sale solo al primer
+  inicio con sesión; se reabre desde Perfil → "Ver tutorial". El paso
+  2 tiene el botón "Dar permisos ahora" que abre el flujo de permisos.
+- **Flujo de permisos** (`src/components/PermissionsFlow.tsx` +
+  `src/lib/permissions.ts`): pide en secuencia Ubicación, Actividad
+  física, Notificaciones, Música y audio y Salud / Health Connect, con
+  botón "Permitir todo". Sale solo la primera vez; se reabre desde
+  Perfil → "Dar todos los permisos". En web no se muestra.
+- **Límites de Android**: no se pueden pedir varios permisos en un
+  solo diálogo (cada uno abre el suyo); la ubicación "Permitir todo el
+  tiempo" solo se concede desde Ajustes (el flujo abre Ajustes) y no
+  se puede comprobar desde el código, así que se muestra como
+  "revisar en Ajustes". Actividad y Notificaciones se piden con el
+  plugin propio `PulsoPermissionsPlugin` (sin dependencias nuevas);
+  el permiso POST_NOTIFICATIONS se declaró en el Manifest.
+
+## UI: barra de música, safe-area y tarjeta de racha
+
+- Alturas fijas en `src/index.css` (nav 64 px, música 64 px, GPS 52 px)
+  con `env(safe-area-inset-*)`: la mini-barra va siempre ENCIMA de la
+  navegación, el contenido reserva ese espacio y el header ya no queda
+  debajo de la barra de estado (Android 15 edge-to-edge).
+- La tarjeta de racha salía vacía porque `Card` ponía siempre
+  `bg-white` y el `bg-night` que le pasaba Inicio perdía: texto
+  blanco sobre fondo blanco. `Card` ya no pone `bg-white` cuando se
+  le pasa un fondo propio (también arregla la tarjeta coral de Retos).
+- La mini-barra ya no trae el botón "Entrenar →" (la ▲ ya lleva a
+  Entrenar) y el título es corto (deporte o nombre de la canción),
+  así ya no se corta como "Músic…".

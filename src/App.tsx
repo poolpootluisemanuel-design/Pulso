@@ -8,6 +8,10 @@ import Search from './components/Search'
 import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
+import Tutorial, { hasSeenTutorial, markTutorialSeen } from './components/Tutorial'
+import PermissionsFlow from './components/PermissionsFlow'
+import { hasSeenPermissionsFlow, markPermissionsFlowSeen } from './lib/permissions'
+import { isNative } from './lib/native'
 import type { TrainActivity } from './components/Train'
 import AdminPanel from './components/AdminPanel'
 import { getCurrentUser, getProfile, isAdminUser, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
@@ -61,6 +65,19 @@ export default function App() {
   // Ruta recomendada elegida en Sesiones → Mapa → "Recorrer esta
   // ruta": Entrenar abre el GPS con esa ruta como guía teal.
   const [guideRoute, setGuideRoute] = useState<RecommendedRoute | null>(null)
+  // Mini tutorial (4 tarjetas) y flujo de permisos: solo al primer
+  // inicio con sesión, nunca en la pantalla de acceso y nunca en web
+  // (los permisos solo existen en la app nativa). Se guardan en
+  // localStorage para no volver a salir solos; se reabren desde Perfil.
+  const [showTutorial, setShowTutorial] = useState(false)
+  const [showPermissions, setShowPermissions] = useState(false)
+  const firstRunRef = useRef(false)
+  useEffect(() => {
+    if (!user || !profile || firstRunRef.current) return
+    firstRunRef.current = true
+    if (!hasSeenTutorial()) setShowTutorial(true)
+    else if (isNative() && !hasSeenPermissionsFlow()) setShowPermissions(true)
+  }, [user, profile])
   useEffect(() => {
     const onUpdate = () => setUpdateAvailable(true)
     window.addEventListener('pulso-sw-update', onUpdate)
@@ -202,8 +219,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-night-50 font-sans text-slate-800">
-      {/* Encabezado estilo app de Muse: logo, avatar y notificaciones */}
-      <header className="sticky top-0 z-10 bg-night px-4 py-3 text-white shadow-lg shadow-night/20">
+      {/* Encabezado estilo app de Muse: logo, avatar y notificaciones.
+          pulso-header: padding-top con safe-area para que en Android
+          nativo no quede debajo de la barra de estado del teléfono. */}
+      <header className="pulso-header sticky top-0 z-10 bg-night px-4 pb-3 text-white shadow-lg shadow-night/20">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pulso text-lg font-black">P</div>
@@ -248,7 +267,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="mx-auto max-w-2xl px-4 pb-40 pt-4">
+      <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
         {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} onRunRoute={(r) => { setGuideRoute(r); setTab('entrenar') }} />}
@@ -261,19 +280,20 @@ export default function App() {
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
-        {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
+        {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} />}
         {tab === 'admin' && admin && (
           <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
         )}
       </main>
 
       {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
-          fijo, siempre en el mismo sitio (encima de la navegación).
-          La música empieza recogida en mini-barra en TODAS las
-          pestañas (también en Entrenar) y solo se expande a una hoja
-          baja de 40vh cuando Luis la abre; al cambiar de pestaña se
-          recoge sola. Así no tapa el contenido ni la barra inferior. */}
-      <div id="pulso-music" className="fixed bottom-[64px] left-0 right-0 z-20 mx-auto max-w-2xl px-3">
+          fijo, siempre en el mismo sitio (encima de la navegación, con
+          pulso-music-dock: bottom = altura del nav + safe-area). La
+          música empieza recogida en mini-barra en TODAS las pestañas
+          (también en Entrenar) y solo se expande a una hoja baja de
+          40vh cuando Luis la abre; al cambiar de pestaña se recoge
+          sola. Así no tapa el contenido ni la barra inferior. */}
+      <div id="pulso-music" className="pulso-music-dock fixed left-0 right-0 z-20 mx-auto max-w-2xl px-3">
         {tab !== 'entrenar' && activity.gps?.active && (
           <button
             onClick={() => setTab('entrenar')}
@@ -299,27 +319,56 @@ export default function App() {
       {/* Botón flotante para crear sesión. Se esconde en Entrenar y
           cuando la hoja de música está expandida, para no taparla ni
           que ella lo tape. En las demás pestañas va siempre encima
-          del contenedor fijo (navegación 64 + mini-barra ~56 + margen
-          16 = 136, redondeado a 144): con GPS activo la barrita añade
-          52 px. Solo dos posiciones fijas, no salta. */}
+          del contenedor fijo (nav 64 + música 64 + margen 16, con
+          safe-area; con GPS activo la barrita añade 52 px). Solo dos
+          posiciones fijas, no salta. */}
       {tab !== 'entrenar' && !musicExpanded && (
         <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
-          className={`fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'bottom-[196px]' : 'bottom-[144px]'}`}>
+          className={`pulso-fab fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
           +
         </button>
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
-        <div className="mx-auto flex max-w-2xl">
+      <nav className="pulso-nav fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
+        <div className="mx-auto flex h-full max-w-2xl">
           {[...TABS, ...(admin ? [{ id: 'admin' as Tab, label: 'Admin', icon: '🛠️' }] : [])].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-1 flex-col items-center py-2 text-[11px] font-bold ${tab === t.id ? 'text-pulso' : 'text-slate-400'}`}>
+            <button key={t.id} onClick={() => setTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso' : 'text-slate-400'}`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}
-              {tab === t.id && <span className="mt-1 h-1 w-6 rounded-full bg-pulso" />}
+              {/* El indicador ocupa siempre su sitio (transparente si
+                  no es la pestaña activa): antes solo existía en la
+                  activa y la altura de la navegación cambiaba. */}
+              <span className={`mt-1 h-1 w-6 rounded-full ${tab === t.id ? 'bg-pulso' : 'bg-transparent'}`} />
             </button>
           ))}
         </div>
       </nav>
+
+      {/* Mini tutorial (4 tarjetas, menos de 30 s) y flujo de permisos:
+          hojas flotantes encima del muelle de música, con la navegación
+          y la música visibles y sin tapar. */}
+      {showTutorial && (
+        <Tutorial
+          onClose={() => {
+            markTutorialSeen()
+            setShowTutorial(false)
+            if (isNative() && !hasSeenPermissionsFlow()) setShowPermissions(true)
+          }}
+          onOpenPermissions={() => {
+            markTutorialSeen()
+            setShowTutorial(false)
+            setShowPermissions(true)
+          }}
+        />
+      )}
+      {showPermissions && (
+        <PermissionsFlow
+          onClose={() => {
+            markPermissionsFlowSeen()
+            setShowPermissions(false)
+          }}
+        />
+      )}
     </div>
   )
 }

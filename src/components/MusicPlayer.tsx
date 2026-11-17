@@ -228,6 +228,14 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const currentLocal = localTracks[localIndex] || null
   const anyPlaying = playing || localPlaying
   const statusTitle = source === 'local' && currentLocal ? cleanTrackName(currentLocal.name) : title
+  // Título CORTO para la mini-barra: el título completo ("Música para
+  // correr…") se cortaba como "Músic…" porque no cabe junto al play,
+  // la miniatura y los botones. En la mini-barra basta el deporte o el
+  // nombre de la canción; el título completo sigue en la hoja y en
+  // Media Session.
+  const miniTitle = source === 'local' && currentLocal
+    ? cleanTrackName(currentLocal.name)
+    : useCustom ? 'Mi playlist' : preset.label
 
   // Avisar arriba (App) para la mini-barra / barrita de actividad.
   useEffect(() => {
@@ -567,8 +575,8 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             {anyPlaying ? '⏸' : '▶'}
           </button>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold">🎵 {statusTitle}</p>
-            <p className="text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}</p>
+            <p className="truncate text-sm font-bold">🎵 {miniTitle}</p>
+            <p className="truncate text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}</p>
           </div>
           {source === 'local' && localTracks.length > 1 && (
             <button
@@ -585,9 +593,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           >
             ▲
           </button>
-          <button onClick={onGoTrain} className="shrink-0 rounded-full bg-teal px-3 py-2 text-xs font-bold text-white">
-            Entrenar →
-          </button>
+          {/* Sin botón "Entrenar →" en la mini-barra: la ▲ ya lleva a
+              Entrenar en las demás pestañas, y ese botón robaba el
+              espacio del título, que se cortaba como "Músic…". */}
         </>
       ) : (
         <div className="mt-2">

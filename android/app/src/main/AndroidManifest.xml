@@ -59,4 +59,8 @@
          READ_EXTERNAL_STORAGE (maxSdkVersion 32). -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- Notificaciones (Android 13+): avisar de sesiones y retos.
+         Se pide en el flujo de permisos (plugin PulsoPermissions);
+         en Android 12 o menos no hace falta pedirlo. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

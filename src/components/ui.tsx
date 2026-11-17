@@ -1,7 +1,18 @@
 import type { ReactNode } from 'react'
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-3xl border border-slate-100 bg-white p-4 shadow-md shadow-night/5 ${className}`}>{children}</div>
+  // Si quien usa la tarjeta ya trae su propio fondo (bg-night, bg-coral…),
+  // NO se pone bg-white: antes ambos fondos convivían y Tailwind
+  // resolvía el conflicto a favor de bg-white, así que la tarjeta de
+  // racha (texto blanco sobre fondo oscuro) quedaba blanca con el texto
+  // invisible — solo se veía el emoji 🔥. Ahora el fondo propio gana
+  // siempre y el borde claro solo va en las tarjetas blancas.
+  const hasBg = /bg-(night|coral|pulso|teal)/.test(className)
+  return (
+    <div className={`rounded-3xl p-4 shadow-md shadow-night/5 ${hasBg ? 'border-transparent' : 'border border-slate-100 bg-white'} ${className}`}>
+      {children}
+    </div>
+  )
 }
 
 export function Btn({
