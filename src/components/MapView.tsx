@@ -1,4 +1,12 @@
-// Mapa real con MapLibre GL + CARTO Dark Matter (sin API key, sin costo).
+// Mapa real con MapLibre GL + Esri World Dark Gray (sin API key, sin costo).
+// - ANTES era CARTO Dark Matter, pero CARTO ya no sirve tiles reales sin
+//   API key: verificado con curl, TODAS las coordenadas devuelven el mismo
+//   tile placeholder de 2.513 bytes (96 % un solo gris #262626), y Stadia
+//   devuelve 401 directo. Eso era el "ocupo API key" que veía Luis.
+// - Esri Canvas World Dark Gray sí sirve tiles reales sin key (verificado
+//   con curl: 200, JPEG con calles reales de Cancún). Base oscura + capa
+//   de referencia (nombres de calles) por encima. OJO: Esri usa
+//   /tile/{z}/{y}/{x} (y antes que x), al revés que OSM/CARTO.
 // - Estilo oscuro PULSO (azul noche #0A1B2E de fondo): las calles claras
 //   de OpenStreetMap se veían viejas y no combinaban con la app.
 // - 3D REAL (estilo Strava): pitch (inclinación) y bearing (rotación)
@@ -31,20 +39,29 @@ export interface MapMarker extends MapPoint {
 // que quien lo necesite no tenga que importar todo el mapa).
 export { CANCUN_CENTER }
 
-// Estilo oscuro: raster CARTO Dark Matter, libre y sin key. El fondo
-// del canvas es azul noche PULSO, así que sin tiles (offline) no se ve
-// un hueco gris claro sino el color de la app.
+// Estilo oscuro: Esri World Dark Gray, libre y sin key (verificado con
+// curl: tiles reales de Cancún, 200). El fondo del canvas es azul noche
+// PULSO, así que sin tiles (offline) no se ve un hueco gris claro sino
+// el color de la app. Esri usa /tile/{z}/{y}/{x}.
 const DARK_STYLE: StyleSpecification = {
   version: 8,
   sources: {
-    'carto-dark': {
+    'esri-dark-base': {
       type: 'raster',
-      tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
       tileSize: 256,
-      attribution: '© OpenStreetMap · © CARTO',
+      attribution: '© Esri, HERE, Garmin, OpenStreetMap contributors',
+    },
+    'esri-dark-ref': {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
     },
   },
-  layers: [{ id: 'carto-dark', type: 'raster', source: 'carto-dark' }],
+  layers: [
+    { id: 'esri-dark-base', type: 'raster', source: 'esri-dark-base' },
+    { id: 'esri-dark-ref', type: 'raster', source: 'esri-dark-ref' },
+  ],
 }
 
 function routeGeo(points: MapPoint[]): FeatureCollection {

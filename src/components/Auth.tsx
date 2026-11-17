@@ -17,6 +17,10 @@ export default function Auth({ onDone }: { onDone: () => void }) {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // Si crear la cuenta pide confirmar el correo, el error de signUp lo
+  // dice ("Revisa tu correo para confirmar la cuenta"): se muestra el
+  // botón para ir a Gmail a verificar, en vez de dejar solo el texto.
+  const needsConfirm = err.toLowerCase().includes('confirmar la cuenta')
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -123,6 +127,19 @@ export default function Auth({ onDone }: { onDone: () => void }) {
             )}
             {err && <p className="rounded-2xl bg-red-50 p-2.5 text-sm font-semibold text-red-700">{err}</p>}
             {msg && <p className="rounded-2xl bg-teal/10 p-2.5 text-sm font-semibold text-teal-dark">{msg}</p>}
+            {needsConfirm && (
+              <div className="space-y-2 rounded-2xl bg-night-50 p-3 text-center">
+                <p className="text-sm font-semibold text-night">Te llegó un correo de Supabase para confirmar tu cuenta.</p>
+                <a href="https://mail.google.com/mail/u/0/#inbox" target="_blank" rel="noreferrer"
+                  className="block w-full rounded-2xl bg-pulso py-3 text-base font-black text-white">
+                  📧 Ir a Gmail para verificar
+                </a>
+                <button type="button" className="w-full text-sm font-semibold text-teal-dark underline"
+                  onClick={() => { setErr(''); setMsg(''); setView('login') }}>
+                  Ya confirmé, entrar
+                </button>
+              </div>
+            )}
             <Btn type="submit" variant="coral" disabled={busy} className="w-full py-3 text-base">
               {busy ? 'Espera…' : view === 'login' ? 'Entrar a PULSO →' : view === 'register' ? 'Crear mi cuenta' : 'Enviar recuperación'}
             </Btn>
