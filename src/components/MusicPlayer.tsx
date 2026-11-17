@@ -11,6 +11,11 @@
 // - El usuario puede pegar su propia playlist/video y se guarda.
 // - NO se puede descargar música de YouTube. La opción local es solo
 //   para canciones que el usuario YA tenga descargadas en su teléfono.
+// - En la app NATIVA de Android (plugin DeviceMusic, src/lib/deviceMusic.ts)
+//   la música local ya no se carga archivo por archivo: con el permiso
+//   de "Música y audio" se lee la lista del teléfono con MediaStore y
+//   suena directo, sin copiar ni subir nada. En web sigue el
+//   <input type=file> de siempre y la lista no persiste al cerrar.
 // - Este componente vive MONTADO EN App.tsx, fuera de las pestañas:
 //   nunca se oculta con display:none (eso pausa el iframe de YouTube).
 //   Por defecto es una MINI-BARRA fija y pequeña en todas las pestañas
@@ -22,6 +27,17 @@
 //   La música local (<audio> + Media Session) aguanta mejor.
 import { useEffect, useRef, useState } from 'react'
 import { getMusicPref, saveMusicPref } from '../lib/store'
+import {
+  clearCachedDeviceSongs,
+  deviceMusicSupported,
+  deviceSongUrl,
+  formatDuration,
+  hasDeviceMusicPermission,
+  listDeviceSongs,
+  loadCachedDeviceSongs,
+  saveCachedDeviceSongs,
+  type DeviceSong,
+} from '../lib/deviceMusic'
 import { Btn, Field, inputCls } from './ui'
 
 // Videos reales de YouTube por deporte (mixes largos, públicos).
@@ -38,7 +54,7 @@ export const MUSIC_PRESETS: Preset[] = [
   { id: 'general', label: 'General', emoji: '🎵', query: 'música para entrenar motivación', videoId: 'a-EkjVGqXtY' },
 ]
 
-interface LocalTrack { name: string; url: string }
+interface LocalTrack { name: string; url: string; durationMs?: number }
 
 // Extrae de un link de YouTube: {kind:'playlist', id} o {kind:'video', id}.
 // Acepta watch?v=, youtu.be/, /embed/, /shorts/, music.youtube.com y &list=.
@@ -149,6 +165,38 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const [localPlaying, setLocalPlaying] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Música local NATIVA (app instalada de Android): canciones del
+  // teléfono leídas con MediaStore, sin elegirlas una por una.
+  // En web nativeMusic es false y no se muestra nada de esto.
+  const nativeMusic = deviceMusicSupported()
+  const [deviceSongs, setDeviceSongs] = useState<DeviceSong[]>(() => loadCachedDeviceSongs(profileId))
+  const [deviceLoaded, setDeviceLoaded] = useState(false)
+  const [deviceLoading, setDeviceLoading] = useState(false)
+  const [deviceStatus, setDeviceStatus] = useState('')
+  const [deviceQuery, setDeviceQuery] = useState('')
+
+  function deviceToTrack(song: DeviceSong): LocalTrack {
+    return {
+      name: song.artist ? `${song.title} — ${song.artist}` : song.title,
+      url: deviceSongUrl(song),
+      durationMs: song.durationMs,
+    }
+  }
+
+  // Al abrir, si ya había una lista de canciones del teléfono guardada
+  // (solo metadatos, nunca los archivos), mostrarla sin escanear de
+  // nuevo. Las URIs de MediaStore son estables, así que sigue sonando.
+  useEffect(() => {
+    if (!nativeMusic) return
+    const cached = loadCachedDeviceSongs(profileId)
+    if (cached.length > 0) {
+      setDeviceSongs(cached)
+      setLocalTracks(cached.map(deviceToTrack))
+      setDeviceLoaded(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Reproductor de YouTube (API oficial). El div del reproductor es
   // siempre el PRIMER hijo del componente y nunca se desmonta: en modo
@@ -395,6 +443,31 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     setPlaying(true)
   }
 
+  // Pide el permiso de Música y audio y lee las canciones del teléfono
+  // (solo en la app nativa). La lista queda guardada en este teléfono.
+  async function loadDeviceSongs() {
+    setDeviceLoading(true)
+    setDeviceStatus('Buscando tus canciones…')
+    const songs = await listDeviceSongs()
+    setDeviceLoading(false)
+    if (songs.length === 0) {
+      const granted = await hasDeviceMusicPermission()
+      setDeviceStatus(granted
+        ? 'No se encontró música en este teléfono (se listan canciones de más de 30 segundos).'
+        : 'Sin permiso de Música y audio. Actívalo en Ajustes → PULSO → Permisos → Música y audio.')
+      return
+    }
+    setDeviceSongs(songs)
+    saveCachedDeviceSongs(profileId, songs)
+    setLocalTracks(songs.map(deviceToTrack))
+    setLocalIndex(0)
+    setSource('local')
+    setPlaying(false)
+    setLocalPlaying(true)
+    setDeviceLoaded(true)
+    setDeviceStatus(`${songs.length} canciones encontradas en tu teléfono.`)
+  }
+
   function pickLocalFiles(files: FileList | null) {
     if (!files || files.length === 0) return
     localTracks.forEach((t) => URL.revokeObjectURL(t.url))
@@ -599,9 +672,29 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-600">
-                Elige canciones que ya tengas en tu teléfono (MP3, M4A, WAV…). No se suben a ningún servidor, solo suenan aquí. Al cerrar la app hay que volver a elegirlas.
-              </p>
+              {nativeMusic ? (
+                <>
+                  <p className="text-sm text-slate-600">
+                    Tus canciones del teléfono, sin elegirlas una por una. Se pide el permiso de Música y audio una sola vez; la lista queda guardada en este teléfono y los archivos no se copian ni se suben a ningún servidor.
+                  </p>
+                  <Btn variant="teal" className="w-full" onClick={() => void loadDeviceSongs()} disabled={deviceLoading}>
+                    {deviceLoading ? '🔍 Buscando…' : deviceLoaded ? '🔄 Actualizar mis canciones' : '🎵 Mis canciones del teléfono'}
+                  </Btn>
+                  {deviceStatus && <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">{deviceStatus}</p>}
+                  {deviceSongs.length > 0 && (
+                    <input
+                      className={inputCls}
+                      value={deviceQuery}
+                      onChange={(e) => setDeviceQuery(e.target.value)}
+                      placeholder="Buscar por título o artista…"
+                    />
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-slate-600">
+                  Elige canciones que ya tengas en tu teléfono (MP3, M4A, WAV…). No se suben a ningún servidor, solo suenan aquí. Al cerrar la app hay que volver a elegirlas.
+                </p>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -611,7 +704,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                 onChange={(e) => { pickLocalFiles(e.target.files); e.target.value = '' }}
               />
               <Btn variant="teal" className="w-full" onClick={() => fileInputRef.current?.click()}>
-                📂 Elegir archivos de mi teléfono
+                {nativeMusic ? '📂 …o elegir archivos a mano' : '📂 Elegir archivos de mi teléfono'}
               </Btn>
               {customErr && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{customErr}</p>}
 
@@ -629,25 +722,41 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                     <Btn variant="ghost" className="flex-1" onClick={() => playLocal((localIndex + 1) % localTracks.length)} disabled={localTracks.length < 2}>Siguiente ⏭</Btn>
                   </div>
                   <p className="text-xs text-slate-500">
-                    Se controla también desde la pantalla de bloqueo / notificaciones. Aguanta mejor en segundo plano que YouTube, pero si bloqueas la pantalla mucho tiempo el navegador puede pausarla: mantén la pantalla encendida con el interruptor de abajo.
+                    Se controla también desde la pantalla de bloqueo / notificaciones. {nativeMusic
+                      ? 'Con la pantalla apagada puede pausarse si Android duerme la app: para que suene seguro, mantén la pantalla encendida con el interruptor de abajo.'
+                      : 'Aguanta mejor en segundo plano que YouTube, pero si bloqueas la pantalla mucho tiempo el navegador puede pausarla: mantén la pantalla encendida con el interruptor de abajo.'}
                   </p>
                 </div>
               )}
 
               {localTracks.length > 0 && (
                 <div className="space-y-1">
-                  {localTracks.map((t, i) => (
-                    <button
-                      key={t.url}
-                      onClick={() => playLocal(i)}
-                      className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${i === localIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}
-                    >
-                      {i === localIndex ? '▶ ' : ''}{cleanTrackName(t.name)}
-                    </button>
-                  ))}
+                  {localTracks
+                    .map((t, i) => ({ t, i }))
+                    .filter(({ t }) => !deviceQuery.trim() || t.name.toLowerCase().includes(deviceQuery.trim().toLowerCase()))
+                    .map(({ t, i }) => (
+                      <button
+                        key={t.url}
+                        onClick={() => playLocal(i)}
+                        className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm ${i === localIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}
+                      >
+                        <span className="min-w-0 truncate">{i === localIndex ? '▶ ' : ''}{cleanTrackName(t.name)}</span>
+                        {t.durationMs ? <span className="shrink-0 text-xs text-slate-400">{formatDuration(t.durationMs)}</span> : null}
+                      </button>
+                    ))}
                   <button
                     className="w-full text-center text-sm text-slate-500 underline"
-                    onClick={() => { localTracks.forEach((t) => URL.revokeObjectURL(t.url)); setLocalTracks([]); setLocalPlaying(false); setLocalIndex(0) }}
+                    onClick={() => {
+                      localTracks.forEach((t) => URL.revokeObjectURL(t.url))
+                      setLocalTracks([])
+                      setLocalPlaying(false)
+                      setLocalIndex(0)
+                      setDeviceSongs([])
+                      setDeviceLoaded(false)
+                      setDeviceStatus('')
+                      setDeviceQuery('')
+                      clearCachedDeviceSongs(profileId)
+                    }}
                   >
                     Quitar lista local
                   </button>

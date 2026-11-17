@@ -48,11 +48,41 @@ Al instalarla y al grabar por primera vez, Android pide:
    → Ajustes → "Sincronizar con Health Connect". Eso no se puede
    forzar desde PULSO; la app lo explica en pantalla.
 
-## Generar el APK de prueba (sin publicar nada)
+## Bajar el APK sin computadora (recomendado)
 
-No se puede generar el APK en este servidor: hace falta Android Studio
-con el SDK de Android (y Java 17+). Pasos en una computadora con
-Android Studio instalado:
+Cada vez que se sube código a la rama `main` de GitHub, GitHub Actions
+compila el APK debug automáticamente (workflow
+`.github/workflows/build-apk.yml`: Node 20 → `npm run build` →
+`npx cap sync android` → JDK 17 + Android SDK API 36 →
+`./gradlew assembleDebug`) y lo deja como artifact
+**`pulso-debug-apk`** por 30 días. Solo APK debug para probar: no hay
+keystore, no hay firma release y no se publica nada en Play Store.
+
+Desde el teléfono, sin computadora:
+
+1. Abrir en Chrome: https://github.com/poolpootluisemanuel-design/Pulso/actions
+2. Entrar al último run de **"Build APK debug"** (debe decir ✅ verde;
+   tarda unos minutos en compilar; si está en amarillo, esperar a que
+   termine).
+3. Abajo, en **Artifacts**, tocar **pulso-debug-apk** para bajar el .zip.
+4. Abrir el .zip descargado y tocar `app-debug.apk` para instalarlo
+   (permitir "instalar apps desconocidas" solo para esa vez, si Chrome
+   lo pide).
+
+También se puede lanzar a mano: en esa misma página, botón **Run
+workflow** → **Run workflow** (sin tocar nada más).
+
+> ⚠️ La primera compilación en GitHub Actions todavía no se ha probado:
+> el workflow se sube con este cambio y su primer run es el que
+> confirma que compila. Si el run falla en rojo, hay que ver el log
+> del paso que falló (normalmente versión de Gradle/JDK o del SDK) y
+> ajustar el workflow. La web de Vercel no depende de esto: sigue
+> desplegándose igual aunque el APK falle.
+
+## Generar el APK en una computadora (alternativa)
+
+Si prefieres compilarlo en local, hace falta Android Studio con el SDK
+de Android (y Java 17+). Pasos:
 
 ```bash
 cd activa-propia
@@ -111,6 +141,25 @@ live. La primera compilación en Android Studio puede pedir ajustes
   y cuenta de Apple Developer ($99 USD/año). La base de Capacitor
   sirve para iOS después (`npx cap add ios`), pero no está configurada.
 
+## Música local del teléfono (nativa, sin cargar archivos)
+
+- En la app instalada de Android, Entrenar → reproductor → 📱 Música local
+  tiene el botón **🎵 Mis canciones del teléfono**: pide el permiso de
+  "Música y audio" una sola vez y lee la lista con MediaStore (título,
+  artista, duración), sin elegir archivos uno por uno y sin copiar ni
+  subir nada. La lista (solo metadatos) queda guardada en el teléfono.
+- Implementación: plugin propio `DeviceMusic`
+  (`android/app/src/main/java/com/pulso/app/DeviceMusicPlugin.java`,
+  registrado en `MainActivity`), permiso `READ_MEDIA_AUDIO` (Android 13+)
+  o `READ_EXTERNAL_STORAGE` (Android 12 o menos) en `AndroidManifest.xml`,
+  puente en `src/lib/deviceMusic.ts`. En web no existe: ahí sigue el
+  selector de archivos de siempre.
+- **Límite honesto**: el audio lo reproduce el `<audio>` de la WebView
+  con Media Session (controles en pantalla de bloqueo). Con la pantalla
+  apagada mucho tiempo Android puede pausar la WebView; sonido garantizado
+  con pantalla apagada necesitaría un reproductor nativo con foreground
+  service (p. ej. @capgo/native-audio), que no está implementado.
+
 ## Límites honestos
 
 - **Con el móvil apagado no se graba nada**: ni GPS, ni pasos, ni
@@ -121,5 +170,9 @@ live. La primera compilación en Android Studio puede pedir ajustes
   grabación: el conteo en vivo sigue siendo el sensor del teléfono
   (estimado). Health Connect no da pasos en tiempo real.
 - **La música en segundo plano con pantalla apagada** sigue necesitando
-  YouTube Premium en la web; en la app nativa, el reproductor local
-  (canciones del teléfono) suena con la pantalla apagada, YouTube no.
+  YouTube Premium en la web. En la app nativa, el reproductor local
+  (canciones del teléfono) se controla desde la pantalla de bloqueo con
+  Media Session, pero Android puede pausarlo si duerme la WebView con
+  la pantalla apagada mucho tiempo: para sonido garantizado haría falta
+  un reproductor nativo con foreground service, que no está implementado.
+  YouTube en nativo tampoco suena con la pantalla apagada sin Premium.

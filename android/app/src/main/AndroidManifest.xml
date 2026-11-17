@@ -53,4 +53,10 @@
          Lo declara el plugin de salud para los datos básicos; este
          permiso extra solo se usa si se pide acceso al historial. -->
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+    <!-- Música local nativa: leer las canciones del teléfono con
+         MediaStore (plugin DeviceMusic). Android 13+ usa el permiso
+         granular READ_MEDIA_AUDIO; en Android 12 o menos se usa
+         READ_EXTERNAL_STORAGE (maxSdkVersion 32). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>
