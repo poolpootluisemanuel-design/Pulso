@@ -43,6 +43,7 @@ jobs:
       - name: Restaurar splash.png (no está en el repo)
         run: |
           for d in android/app/src/main/res/drawable android/app/src/main/res/drawable-land-hdpi android/app/src/main/res/drawable-land-mdpi android/app/src/main/res/drawable-land-xhdpi android/app/src/main/res/drawable-land-xxhdpi android/app/src/main/res/drawable-land-xxxhdpi android/app/src/main/res/drawable-port-hdpi android/app/src/main/res/drawable-port-mdpi android/app/src/main/res/drawable-port-xhdpi android/app/src/main/res/drawable-port-xxhdpi android/app/src/main/res/drawable-port-xxxhdpi; do mkdir -p "$d"; cp public/icons/icon-512.png "$d/splash.png"; done
+          for d in android/app/src/main/res/mipmap-hdpi android/app/src/main/res/mipmap-mdpi android/app/src/main/res/mipmap-xhdpi android/app/src/main/res/mipmap-xxhdpi android/app/src/main/res/mipmap-xxxhdpi; do mkdir -p "$d"; cp public/icons/icon-512.png "$d/ic_launcher.png"; cp public/icons/icon-512.png "$d/ic_launcher_foreground.png"; cp public/icons/icon-512.png "$d/ic_launcher_round.png"; done
           ls android/app/src/main/res/drawable/splash.png
 
 
