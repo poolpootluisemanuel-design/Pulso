@@ -1,13 +1,16 @@
 # PULSO — APK debug automático (sin computadora)
 name: Build APK debug
 
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+
 permissions:
   contents: read
+
 
 jobs:
   build-apk:
@@ -32,12 +35,11 @@ jobs:
         with:
           java-version: 17
           distribution: temurin
-      - name: Instalar Android SDK (API 36)
-        uses: android-actions/setup-android@v3
       - name: Instalar plataforma y build-tools 36
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Compilar APK debug
         working-directory: android
         run: |
