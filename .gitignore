@@ -14,6 +14,18 @@ dist-ssr
 .env
 .env.local
 
+# App nativa (Capacitor / Android): lo generado al compilar no se sube.
+# La carpeta android/ SÍ se sube (código fuente), menos lo generado.
+android/app/build
+android/build
+android/.gradle
+android/app/src/main/assets
+android/local.properties
+android/*.iml
+android/.idea
+*.keystore
+*.jks
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

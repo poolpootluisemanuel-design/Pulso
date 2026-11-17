@@ -3,6 +3,9 @@ import { haversineKm, paceMinKm } from '../lib/utils'
 import { computeNavigation, formatDistM } from '../lib/navigation'
 import type { RecommendedRoute } from '../lib/routes'
 import { routeDistanceKm } from '../lib/routes'
+import { isNative } from '../lib/native'
+import { getNativeCurrentPosition, startNativeWatch, stopNativeWatch } from '../lib/nativeGps'
+import { getTodaySteps, healthAvailable, openHealthConnectSettings, requestStepsAccess } from '../lib/healthConnect'
 import { Btn, Card } from './ui'
 // El mapa (MapLibre, ~1 MB) solo se descarga cuando se muestra uno,
 // no en la primera carga de la app: Entrenar abre sin esperarlo.
@@ -110,6 +113,12 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
   // dentro de casa) y se deja de sumar distancia hasta moverse de verdad.
   const [autoPaused, setAutoPaused] = useState(false)
   const watchId = useRef<number | null>(null)
+  // App nativa: id del watcher en segundo plano (BackgroundGeolocation).
+  const nativeWatcherId = useRef<string | null>(null)
+  // Health Connect (solo app nativa): pasos de hoy leídos del teléfono.
+  const [hcSteps, setHcSteps] = useState<number | null>(null)
+  const [hcState, setHcState] = useState<'idle' | 'loading' | 'ok' | 'unavailable' | 'denied'>('idle')
+  const [hcMsg, setHcMsg] = useState('')
   const lastPoint = useRef<Point | null>(null)
   const lastFixAt = useRef<number>(0)
   // Ventana de 30 s para detectar parado: distancia real aceptada en ella.
@@ -223,9 +232,42 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
 
   useEffect(() => () => {
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
+    if (nativeWatcherId.current !== null) void stopNativeWatch(nativeWatcherId.current)
   }, [])
 
+  // Pasos de hoy desde Health Connect (solo app nativa de Android):
+  // Samsung Health / Google Fit juntan ahí los pasos del teléfono, y
+  // PULSO los lee con permiso del usuario. En web no existe.
+  async function loadTodaySteps() {
+    setHcState('loading')
+    setHcMsg('')
+    const avail = await healthAvailable()
+    if (!avail.available) {
+      setHcState('unavailable')
+      setHcMsg(avail.reason || 'Health Connect no está en este teléfono. En Android 13 o menos hay que instalar "Health Connect by Android" desde Play Store.')
+      return
+    }
+    const granted = await requestStepsAccess()
+    if (!granted) {
+      setHcState('denied')
+      setHcMsg('No diste permiso para leer pasos. Puedes darlo en Ajustes de Health Connect.')
+      return
+    }
+    const n = await getTodaySteps()
+    if (n === null) {
+      setHcState('unavailable')
+      setHcMsg('No se pudieron leer los pasos de hoy. Revisa que Samsung Health o Google Fit sincronicen con Health Connect.')
+      return
+    }
+    setHcSteps(n)
+    setHcState('ok')
+  }
+
   function stopWatch() {
+    if (nativeWatcherId.current !== null) {
+      void stopNativeWatch(nativeWatcherId.current)
+      nativeWatcherId.current = null
+    }
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
     watchId.current = null
   }
@@ -235,60 +277,82 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
     setAutoPaused(v)
   }
 
+  // Una posición aceptada (ya pasó el filtro anti-deriva): es la misma
+  // lógica para web y para nativo; solo cambia de dónde viene la posición.
+  function handleFix(next: Point, accuracy: number) {
+    const now = Date.now()
+    const prev = lastPoint.current
+    if (!prev) { lastPoint.current = next; lastFixAt.current = now; return }
+    const d = haversineKm(prev, next)
+    // Tiempo desde la última lectura válida: para la velocidad implícita.
+    const dtSec = Math.max(0.5, (now - lastFixAt.current) / 1000)
+    lastFixAt.current = now
+    if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
+    // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
+    // caminando. La deriva salta así; el movimiento real no.
+    const speedMs = (d * 1000) / dtSec
+    const maxSpeedMs = sport === 'Ciclismo' ? 15 : sport === 'Correr' ? 6 : 2.5
+    if (speedMs > maxSpeedMs) return
+    // Ventana de 30 s: si en 30 s no se acumuló movimiento real
+    // (menos de 10 m), estás parado: entra la pausa automática y los
+    // saltos de deriva ya no se suman. El cronómetro sigue corriendo.
+    if (now - stillWindowStart.current >= 30000) {
+      const wasStill = stillWindowDistKm.current < 0.010
+      stillWindowStart.current = now
+      stillWindowDistKm.current = 0
+      if (wasStill) setAutoPausedBoth(true)
+    }
+    if (autoPausedRef.current) {
+      // Parado: solo un desplazamiento grande (>= 15 m desde el ancla)
+      // y con buena precisión reanuda el conteo. Los saltos chicos de
+      // deriva no mueven el ancla, así que no se acumulan.
+      if (d < 0.015 || accuracy > 15) return
+      setAutoPausedBoth(false)
+      stillWindowStart.current = now
+      stillWindowDistKm.current = 0
+    } else {
+      // Umbral de ruido: menos de 8 m desde el ancla se ignora y el
+      // ancla NO se mueve, así el movimiento real lento (caminar 1-2 m
+      // por lectura) se acumula hasta pasar 8 m y sí se suma, mientras
+      // que los saltos de deriva quedan atrapados alrededor del ancla.
+      // Con señal floja (accuracy > 15 m) el umbral sube a 10 m.
+      const minMoveKm = accuracy > 15 ? 0.010 : 0.008
+      if (d < minMoveKm) return
+    }
+    lastPoint.current = next
+    stillWindowDistKm.current += d
+    setCurrentPos(next)
+    setDistanceKm((km) => km + d)
+    setPoints((pts) => [...pts, next])
+  }
+
   function startWatch(from: Point) {
     lastPoint.current = from
     lastFixAt.current = Date.now()
     stillWindowStart.current = Date.now()
     stillWindowDistKm.current = 0
     setAutoPausedBoth(false)
+    // APP NATIVA: watcher en segundo plano (BackgroundGeolocation). En
+    // Android corre un servicio en primer plano con notificación y las
+    // posiciones siguen llegando con la pantalla apagada, como Strava.
+    // En web se usa el watchPosition del navegador, que se pausa al
+    // apagar la pantalla.
+    if (isNative()) {
+      void startNativeWatch(
+        (fix) => {
+          if (fix.accuracy > 25) return // punto poco preciso, se descarta
+          handleFix({ lat: fix.lat, lng: fix.lng }, fix.accuracy)
+        },
+        (msg) => setError(msg),
+      )
+        .then((id) => { nativeWatcherId.current = id })
+        .catch(() => setError('No se pudo iniciar el GPS en segundo plano. Revisa el permiso de ubicación en Ajustes.'))
+      return
+    }
     watchId.current = navigator.geolocation.watchPosition(
       (pos2) => {
         if (pos2.coords.accuracy > 25) return // punto poco preciso, se descarta
-        const now = Date.now()
-        const next = { lat: pos2.coords.latitude, lng: pos2.coords.longitude }
-        const prev = lastPoint.current
-        if (!prev) { lastPoint.current = next; lastFixAt.current = now; return }
-        const d = haversineKm(prev, next)
-        // Tiempo desde la última lectura válida: para la velocidad implícita.
-        const dtSec = Math.max(0.5, (now - lastFixAt.current) / 1000)
-        lastFixAt.current = now
-        if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
-        // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
-        // caminando. La deriva salta así; el movimiento real no.
-        const speedMs = (d * 1000) / dtSec
-        const maxSpeedMs = sport === 'Ciclismo' ? 15 : sport === 'Correr' ? 6 : 2.5
-        if (speedMs > maxSpeedMs) return
-        // Ventana de 30 s: si en 30 s no se acumuló movimiento real
-        // (menos de 10 m), estás parado: entra la pausa automática y los
-        // saltos de deriva ya no se suman. El cronómetro sigue corriendo.
-        if (now - stillWindowStart.current >= 30000) {
-          const wasStill = stillWindowDistKm.current < 0.010
-          stillWindowStart.current = now
-          stillWindowDistKm.current = 0
-          if (wasStill) setAutoPausedBoth(true)
-        }
-        if (autoPausedRef.current) {
-          // Parado: solo un desplazamiento grande (>= 15 m desde el ancla)
-          // y con buena precisión reanuda el conteo. Los saltos chicos de
-          // deriva no mueven el ancla, así que no se acumulan.
-          if (d < 0.015 || pos2.coords.accuracy > 15) return
-          setAutoPausedBoth(false)
-          stillWindowStart.current = now
-          stillWindowDistKm.current = 0
-        } else {
-          // Umbral de ruido: menos de 8 m desde el ancla se ignora y el
-          // ancla NO se mueve, así el movimiento real lento (caminar 1-2 m
-          // por lectura) se acumula hasta pasar 8 m y sí se suma, mientras
-          // que los saltos de deriva quedan atrapados alrededor del ancla.
-          // Con señal floja (accuracy > 15 m) el umbral sube a 10 m.
-          const minMoveKm = pos2.coords.accuracy > 15 ? 0.010 : 0.008
-          if (d < minMoveKm) return
-        }
-        lastPoint.current = next
-        stillWindowDistKm.current += d
-        setCurrentPos(next)
-        setDistanceKm((km) => km + d)
-        setPoints((pts) => [...pts, next])
+        handleFix({ lat: pos2.coords.latitude, lng: pos2.coords.longitude }, pos2.coords.accuracy)
       },
       () => setError('Se perdió la señal GPS. La grabación sigue con lo que llevaba.'),
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
@@ -307,59 +371,66 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
   // podía arrancar anclada a un punto con ±50 m de error y de ahí salían
   // los primeros saltos fantasma. Si la señal es muy débil, no arranca
   // y pide salir al aire libre, en vez de inventar distancia.
-  function acceptFirstFix(pos: GeolocationPosition, onOk: (p: Point) => void) {
-    if (pos.coords.accuracy > 25) {
-      setError(`Señal GPS muy débil (precisión ±${Math.round(pos.coords.accuracy)} m). Sal al aire libre, espera unos segundos y vuelve a tocar Iniciar.`)
+  function acceptFirstFix(lat: number, lng: number, accuracy: number, onOk: (p: Point) => void) {
+    if (accuracy > 25) {
+      setError(`Señal GPS muy débil (precisión ±${Math.round(accuracy)} m). Sal al aire libre, espera unos segundos y vuelve a tocar Iniciar.`)
       return
     }
-    onOk({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+    onOk({ lat, lng })
   }
 
-  function resume() {
-    setError('')
+  // Primera posición: en nativo con el plugin de Capacitor, en web con
+  // el navegador. Si no hay GPS, se avisa (no se inventa un punto).
+  function requestFirstFix(onOk: (p: Point) => void, onFail: () => void) {
+    if (isNative()) {
+      void getNativeCurrentPosition().then((p) => {
+        if (!p) { onFail(); return }
+        acceptFirstFix(p.lat, p.lng, p.accuracy, onOk)
+      })
+      return
+    }
     if (!('geolocation' in navigator)) {
       setError('Este teléfono o navegador no tiene GPS disponible. Usa el registro manual.')
       return
     }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => acceptFirstFix(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, onOk),
+      onFail,
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  function resume() {
+    setError('')
     // Permiso del sensor de pasos: se pide con el toque (gesto del
     // usuario). No bloquea el GPS: si lo niegan, solo no hay pasos.
     if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        acceptFirstFix(pos, (p) => {
-          // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
-          // si no, este es el primer punto.
-          if (points.length === 0) setPoints([p])
-          setCurrentPos(p)
-          setStatus('recording')
-          startWatch(p)
-        })
+    requestFirstFix(
+      (p) => {
+        // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
+        // si no, este es el primer punto.
+        if (points.length === 0) setPoints([p])
+        setCurrentPos(p)
+        setStatus('recording')
+        startWatch(p)
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
-      { enableHighAccuracy: true, timeout: 10000 }
     )
   }
 
   function start() {
     setError('')
-    if (!('geolocation' in navigator)) {
-      setError('Este teléfono o navegador no tiene GPS disponible. Usa el registro manual.')
-      return
-    }
     // Permiso del sensor de pasos: se pide con el toque (gesto del
     // usuario). No bloquea el GPS: si lo niegan, solo no hay pasos.
     if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        acceptFirstFix(pos, (p) => {
-          setPoints([p])
-          setCurrentPos(p)
-          setStatus('recording')
-          startWatch(p)
-        })
+    requestFirstFix(
+      (p) => {
+        setPoints([p])
+        setCurrentPos(p)
+        setStatus('recording')
+        startWatch(p)
       },
       () => setError('No diste permiso de ubicación. Pulso la ubicación para este sitio y vuelve a intentar.'),
-      { enableHighAccuracy: true, timeout: 10000 }
     )
   }
 
@@ -440,9 +511,32 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
               👣 Contar mis pasos con el sensor del teléfono
             </label>
           )}
-          <p className="rounded-xl bg-sage-50 p-2 text-xs text-slate-600">
-            👣 Los pasos se cuentan solo mientras entrenas con la app abierta. En segundo plano o con el móvil apagado no se cuentan en la web; eso llega con la app nativa (Health Connect).
-          </p>
+          {isNative() ? (
+            <div className="space-y-2 rounded-xl bg-teal/10 p-2 text-xs text-teal-dark">
+              <p className="font-semibold">📱 App instalada: el GPS sigue grabando aunque apagues la pantalla (dale a la ubicación "Permitir todo el tiempo").</p>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">
+                  👣 Pasos de hoy (Health Connect): {hcState === 'ok' && hcSteps !== null ? `${hcSteps.toLocaleString('es-MX')} pasos` : '—'}
+                </span>
+                <button
+                  className="shrink-0 rounded-full bg-teal px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                  disabled={hcState === 'loading'}
+                  onClick={() => void loadTodaySteps()}
+                >
+                  {hcState === 'loading' ? 'Leyendo…' : 'Ver mis pasos'}
+                </button>
+              </div>
+              {hcMsg && <p className="text-slate-600">{hcMsg}</p>}
+              {hcState === 'unavailable' && (
+                <button className="text-xs font-bold underline" onClick={() => void openHealthConnectSettings()}>Abrir ajustes de Health Connect</button>
+              )}
+              <p className="text-slate-600">Los pasos vienen de Samsung Health / Google Fit, si sincronizan con Health Connect. Con el móvil apagado ningún sensor cuenta nada.</p>
+            </div>
+          ) : (
+            <p className="rounded-xl bg-sage-50 p-2 text-xs text-slate-600">
+              👣 Los pasos se cuentan solo mientras entrenas con la app abierta. En segundo plano o con el móvil apagado no se cuentan en la web; eso llega con la app nativa (Health Connect).
+            </p>
+          )}
           {error && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{error}</p>}
           <Btn variant="coral" className="w-full" onClick={start}>▶ Iniciar grabación GPS</Btn>
           <button className="w-full text-center text-sm text-slate-500 underline" onClick={onCancel}>Usar registro manual</button>
@@ -499,11 +593,11 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
             </div>
           )}
           {routeMap}
-          <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : '● Grabando… no cierres la app'}</p>
+          <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : isNative() ? '● Grabando… puedes apagar la pantalla, el GPS sigue' : '● Grabando… no cierres la app'}</p>
           {autoPaused && status === 'recording' && (
             <p className="rounded-xl bg-amber-50 p-2 text-center text-sm text-amber-800">⏸ Parece que estás parado — GPS en pausa automática. La distancia no se suma hasta que te muevas de verdad. El tiempo sigue corriendo.</p>
           )}
-          <p className="text-center text-xs text-slate-500">La pantalla se mantiene encendida mientras grabas, para que el GPS y la música no se pausen.</p>
+          <p className="text-center text-xs text-slate-500">{isNative() ? 'En la app instalada el GPS sigue grabando con la pantalla apagada (servicio en primer plano). Con el móvil apagado sí se pausa todo.' : 'La pantalla se mantiene encendida mientras grabas, para que el GPS y la música no se pausen.'}</p>
           {error && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">{error}</p>}
           <div className="flex gap-2">
             {status === 'recording'

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PULSO</string>
+    <string name="title_activity_main">PULSO</string>
+    <string name="package_name">com.pulso.app</string>
+    <string name="custom_url_scheme">com.pulso.app</string>
+</resources>

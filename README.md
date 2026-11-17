@@ -144,8 +144,10 @@ la app lo dice y trabaja en local.
 - [ ] **Fase 4 — Negocios:** panel para que coaches/gyms/canchas publiquen
       sus clases y reservas.
 - [ ] **Fase 5 — Play Store:** cuenta de desarrollador de Google
-      ($25 USD, pago único) y convertir esta misma base con Capacitor.
-      App Store después, solo si se decide ($99 USD/año).
+      ($25 USD, pago único). La base nativa con Capacitor YA está hecha
+      (ver `NATIVE.md` y sección 8): falta generar el APK en Android
+      Studio, firmarlo y subirlo. App Store después, solo si se decide
+      ($99 USD/año).
 
 ## 6. Estructura del código
 
@@ -199,3 +201,23 @@ activa-propia/
 - Costos estimados (pueden cambiar, se confirman antes de pagar):
   dominio aprox. $10–$20 USD/año; Supabase y Vercel $0 al empezar;
   Play Store $25 USD una sola vez, solo en la fase 5.
+
+## 8. App nativa (Android, base con Capacitor)
+
+La base nativa ya está hecha y vive en este mismo proyecto: ver
+**`NATIVE.md`** para el detalle completo.
+
+- **Capacitor 8**, app `com.pulso.app`, carpeta `android/`.
+- **GPS en segundo plano** (`@capacitor-community/background-geolocation`):
+  en la app instalada la grabación sigue con la pantalla apagada,
+  con la notificación "PULSO · Grabando". En web no cambia nada.
+- **Pasos con Health Connect** (`@capgo/capacitor-health`): en la app
+  instalada, Entrenar → Grabar con GPS tiene "Ver mis pasos", que lee
+  los pasos de hoy de Samsung Health / Google Fit (si sincronizan con
+  Health Connect).
+- **Generar el APK de prueba**: `npm run build` → `npx cap sync android`
+  → abrir `android/` en Android Studio → Build APK(s). No se ha
+  compilado aquí (no hay Android Studio en este servidor).
+- **Play Store**: falta la cuenta de desarrollador ($25 USD, pago único,
+  a nombre de Luis), firmar la app (keystore, nunca en el repo) y la
+  revisión de Google.
