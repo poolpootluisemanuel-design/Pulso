@@ -42,6 +42,8 @@ jobs:
       - name: Sincronizar Capacitor con Android
         run: npx cap sync android
 
+      - name: Restaurar google-services.json (secreto)
+        run: printf '%s' '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
 
       - name: Restaurar splash.png (no está en el repo)
         run: |
