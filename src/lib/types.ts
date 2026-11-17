@@ -63,6 +63,10 @@ export interface Workout {
   date: string // YYYY-MM-DD
   duration_min: number
   distance_km?: number
+  /** Pasos contados con el sensor de movimiento durante la grabación
+   *  GPS (solo con la app abierta; en web no se cuentan en segundo
+   *  plano ni con el móvil apagado). */
+  steps?: number
   notes?: string
   route?: { lat: number; lng: number }[]
 }

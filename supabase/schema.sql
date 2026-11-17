@@ -58,6 +58,7 @@ create table if not exists sessions (
 -- sin borrar nada. Vuelve a correr este archivo en el SQL Editor.
 alter table sessions add column if not exists lat numeric;
 alter table sessions add column if not exists lng numeric;
+alter table workouts add column if not exists steps int;
 
 -- Confirmaciones y lista de espera.
 create table if not exists rsvps (
@@ -77,6 +78,7 @@ create table if not exists workouts (
   date date not null,
   duration_min int not null,
   distance_km numeric,
+  steps int, -- pasos contados con el sensor durante la grabación GPS
   notes text,
   route jsonb, -- [{lat, lng}, ...] o null
   created_at timestamptz not null default now()

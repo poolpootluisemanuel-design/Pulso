@@ -108,7 +108,13 @@ export async function syncOutbox(): Promise<number> {
         const item = op.item as Workout
         const { route, ...rest } = item
         const { error } = await supabase.from('workouts').upsert({ ...rest, route: route || null }, { onConflict: 'id' })
-        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+        if (error && /steps|column/i.test(error.message)) {
+          // La base aún no tiene la columna steps (falta correr el
+          // schema nuevo): se sube sin pasos, sin perder el entrenamiento.
+          const { steps: _steps, ...restNoSteps } = rest
+          const { error: e2 } = await supabase.from('workouts').upsert({ ...restNoSteps, route: route || null }, { onConflict: 'id' })
+          if (e2 && !/duplicate|unique|conflict/i.test(e2.message)) throw e2
+        } else if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
       } else if (op.kind === 'session' && op.item) {
         const s = op.item as SessionItem
         const { error } = await supabase.from('sessions').upsert(s, { onConflict: 'id' })
@@ -684,6 +690,18 @@ export async function logWorkout(w: Omit<Workout, 'id'>): Promise<Workout> {
     try {
       const { route, ...rest } = item
       const { error } = await withTimeout(supabase.from('workouts').insert({ ...rest, route: route || null }))
+      if (error && /steps|column/i.test(error.message)) {
+        // La base aún no tiene la columna steps (falta correr el schema
+        // nuevo): se guarda sin pasos, sin perder el entrenamiento.
+        // Los pasos quedan en el espejo local de este teléfono.
+        const { steps: _steps, ...restNoSteps } = rest
+        const { error: e2 } = await withTimeout(supabase.from('workouts').insert({ ...restNoSteps, route: route || null }))
+        if (e2) throw new Error(e2.message)
+        const list = cacheGet<Workout[]>('workouts_' + item.profile_id, load<Workout[]>('workouts', []))
+        list.unshift(item)
+        cacheSet('workouts_' + item.profile_id, list)
+        return item
+      }
       if (error) throw new Error(error.message)
     } catch (e) {
       if (!isNetworkError(e)) throw e

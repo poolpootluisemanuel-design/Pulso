@@ -92,7 +92,7 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
           guide={guideRoute}
           onClearGuide={() => onGuideDone?.()}
           onSave={async (r) => {
-            await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
+            await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, steps: r.steps, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
             setShowGps(false)
             setMsg('Entrenamiento con GPS guardado.')
             onGuideDone?.()
@@ -139,7 +139,7 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-bold">{w.sport} · {formatDate(w.date)}</p>
-                  <p className="text-sm text-slate-600">{w.duration_min} min{w.distance_km ? ` · ${w.distance_km} km · ${paceMinKm(w.distance_km, w.duration_min)}` : ''}</p>
+                  <p className="text-sm text-slate-600">{w.duration_min} min{w.distance_km ? ` · ${w.distance_km} km · ${paceMinKm(w.distance_km, w.duration_min)}` : ''}{w.steps ? ` · 👣 ${w.steps.toLocaleString('es-MX')} pasos` : ''}</p>
                   {w.notes && <p className="text-sm text-slate-500">{w.notes}</p>}
                 </div>
                 <button className="text-sm text-red-500 underline" onClick={async () => { await deleteWorkout(w.id); onRefresh() }}>Borrar</button>

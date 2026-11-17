@@ -15,13 +15,17 @@ export interface GpsResult {
   durationMin: number
   distanceKm: number
   route: Point[]
+  /** Pasos contados con el sensor de movimiento durante la grabación
+   *  (solo con la app abierta; en web no se cuentan en segundo plano
+   *  ni con el móvil apagado). */
+  steps?: number
 }
 
 export interface GpsProgress { active: boolean; status: 'idle' | 'recording' | 'paused' | 'done'; seconds: number; distanceKm: number; sport: string }
 
 const GPS_SAVED_KEY = 'pulso_local_gps_in_progress'
 
-interface SavedGps { sport: string; seconds: number; distanceKm: number; points: Point[]; savedAt: number }
+interface SavedGps { sport: string; seconds: number; distanceKm: number; points: Point[]; savedAt: number; steps?: number }
 
 function loadSavedGps(): SavedGps | null {
   try {
@@ -55,6 +59,19 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
   const [status, setStatus] = useState<'idle' | 'recording' | 'paused' | 'done'>(saved ? 'paused' : 'idle')
   const [seconds, setSeconds] = useState(saved?.seconds || 0)
   const [distanceKm, setDistanceKm] = useState(saved?.distanceKm || 0)
+  const [steps, setSteps] = useState(saved?.steps || 0)
+  // Contador de pasos (sensor de movimiento): solo cuenta mientras
+  // entrenas con la app abierta. En la web el navegador detiene la
+  // app al cerrarla y con el móvil apagado ningún sensor cuenta nada:
+  // eso es honesto y se dice en pantalla; el conteo en segundo plano
+  // llega con la app nativa (Health Connect).
+  const [stepsOn, setStepsOn] = useState(true)
+  const [stepsState, setStepsState] = useState<'idle' | 'counting' | 'unsupported' | 'denied'>('idle')
+  const stepsRef = useRef(saved?.steps || 0)
+  const lastStepAtRef = useRef(0)
+  const prevMagRef = useRef(0)
+  const motionEventsRef = useRef(0)
+  const motionGrantedRef = useRef<boolean | null>(null)
   const [error, setError] = useState(saved ? 'Tienes una grabación sin terminar. Toca Reanudar para seguir donde ibas.' : '')
   const [points, setPoints] = useState<Point[]>(saved?.points || [])
   // Posición actual aceptada (ya pasó el filtro anti-deriva): es la
@@ -107,17 +124,80 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
     return () => clearInterval(t)
   }, [status])
 
+  // Pedir permiso del sensor de movimiento: en iOS hay que pedirlo con
+  // un gesto del usuario (por eso se pide en Iniciar/Reanudar, no aquí).
+  // En Android/Chrome no hay prompt: el sensor se usa directo.
+  async function requestMotionPermission(): Promise<boolean> {
+    try {
+      if (typeof DeviceMotionEvent === 'undefined') { setStepsState('unsupported'); return false }
+      const dme = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> }
+      if (typeof dme.requestPermission === 'function') {
+        const res = await dme.requestPermission()
+        motionGrantedRef.current = res === 'granted'
+        if (res !== 'granted') setStepsState('denied')
+        return res === 'granted'
+      }
+      motionGrantedRef.current = true
+      return true
+    } catch {
+      motionGrantedRef.current = null
+      return true // si el permiso falla, se intenta igual con el listener
+    }
+  }
+
+  // Contador de pasos con el sensor de movimiento, solo mientras grabas
+  // y con la app abierta. Detección por picos de aceleración: cada paso
+  // al caminar/correr produce un pico de la aceleración total por encima
+  // de ~11 m/s² (la gravedad en reposo es ~9.8); se cuenta un paso por
+  // cada cruce ascendente, con mínimo 300 ms entre pasos para no contar
+  // el mismo paso dos veces. Es un estimado, no el podómetro del sistema.
+  useEffect(() => {
+    if (status !== 'recording' || !stepsOn || sport === 'Ciclismo') return
+    if (motionGrantedRef.current === false) { setStepsState('denied'); return }
+    if (typeof DeviceMotionEvent === 'undefined') { setStepsState('unsupported'); return }
+    setStepsState('counting')
+    motionEventsRef.current = 0
+    prevMagRef.current = 0
+    const onMotion = (e: DeviceMotionEvent) => {
+      motionEventsRef.current += 1
+      const a = e.accelerationIncludingGravity
+      if (!a || a.x == null || a.y == null || a.z == null) return
+      const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
+      const prev = prevMagRef.current
+      prevMagRef.current = mag
+      // Cruce ascendente del umbral, con refractory de 300 ms.
+      if (mag > 11.0 && prev <= 11.0) {
+        const now = Date.now()
+        if (now - lastStepAtRef.current >= 300) {
+          lastStepAtRef.current = now
+          stepsRef.current += 1
+          setSteps(stepsRef.current)
+        }
+      }
+    }
+    window.addEventListener('devicemotion', onMotion)
+    // Si en 6 s no llega ningún evento, este navegador no da el sensor:
+    // se avisa y el GPS sigue normal, sin error.
+    const t = setTimeout(() => {
+      if (motionEventsRef.current === 0) setStepsState('unsupported')
+    }, 6000)
+    return () => {
+      window.removeEventListener('devicemotion', onMotion)
+      clearTimeout(t)
+    }
+  }, [status, stepsOn, sport])
+
   // Guardar el progreso mientras graba / en pausa: sobrevive a recargar.
   // Al terminar, guardar o descartar se borra.
   useEffect(() => {
     try {
       if (status === 'recording' || status === 'paused') {
-        localStorage.setItem(GPS_SAVED_KEY, JSON.stringify({ sport, seconds, distanceKm, points, savedAt: Date.now() }))
+        localStorage.setItem(GPS_SAVED_KEY, JSON.stringify({ sport, seconds, distanceKm, points, steps, savedAt: Date.now() }))
       } else {
         localStorage.removeItem(GPS_SAVED_KEY)
       }
     } catch { /* localStorage lleno o bloqueado: la grabación sigue en memoria */ }
-  }, [status, seconds, distanceKm, points, sport])
+  }, [status, seconds, distanceKm, points, sport, steps])
 
   // Avisar arriba (App) para la barrita "Grabando…".
   useEffect(() => {
@@ -241,6 +321,9 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
       setError('Este teléfono o navegador no tiene GPS disponible. Usa el registro manual.')
       return
     }
+    // Permiso del sensor de pasos: se pide con el toque (gesto del
+    // usuario). No bloquea el GPS: si lo niegan, solo no hay pasos.
+    if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         acceptFirstFix(pos, (p) => {
@@ -263,6 +346,9 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
       setError('Este teléfono o navegador no tiene GPS disponible. Usa el registro manual.')
       return
     }
+    // Permiso del sensor de pasos: se pide con el toque (gesto del
+    // usuario). No bloquea el GPS: si lo niegan, solo no hay pasos.
+    if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         acceptFirstFix(pos, (p) => {
@@ -348,6 +434,15 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
               </button>
             ))}
           </div>
+          {sport !== 'Ciclismo' && (
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input type="checkbox" checked={stepsOn} onChange={(e) => setStepsOn(e.target.checked)} />
+              👣 Contar mis pasos con el sensor del teléfono
+            </label>
+          )}
+          <p className="rounded-xl bg-sage-50 p-2 text-xs text-slate-600">
+            👣 Los pasos se cuentan solo mientras entrenas con la app abierta. En segundo plano o con el móvil apagado no se cuentan en la web; eso llega con la app nativa (Health Connect).
+          </p>
           {error && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{error}</p>}
           <Btn variant="coral" className="w-full" onClick={start}>▶ Iniciar grabación GPS</Btn>
           <button className="w-full text-center text-sm text-slate-500 underline" onClick={onCancel}>Usar registro manual</button>
@@ -392,6 +487,17 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : distanceKm < 0.01 ? '—' : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
           </div>
+          {sport !== 'Ciclismo' && (
+            <div className="rounded-xl bg-sage-50 p-2 text-center">
+              <p className="text-xl font-black tabular-nums">👣 {steps.toLocaleString('es-MX')} pasos</p>
+              <p className="text-xs text-slate-500">
+                {stepsState === 'counting' ? 'Contando con el sensor · estimado, solo con la app abierta'
+                  : stepsState === 'denied' ? 'No diste permiso al sensor: el GPS sigue normal, sin pasos.'
+                  : stepsState === 'unsupported' ? 'Tu navegador no da el sensor de pasos: el GPS sigue normal.'
+                  : stepsOn ? 'Contador de pasos activado' : 'Contador de pasos apagado'}
+              </p>
+            </div>
+          )}
           {routeMap}
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : '● Grabando… no cierres la app'}</p>
           {autoPaused && status === 'recording' && (
@@ -411,12 +517,12 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
       {status === 'done' && (
         <div className="space-y-3">
           <h4 className="font-bold">Resumen de tu {sport.toLowerCase()}</h4>
-          <p className="text-sm text-slate-600">Tiempo: {mm}:{ss} · Distancia: {distanceKm.toFixed(2)} km · Ritmo: {paceMinKm(distanceKm, minutes)}</p>
+          <p className="text-sm text-slate-600">Tiempo: {mm}:{ss} · Distancia: {distanceKm.toFixed(2)} km · Ritmo: {paceMinKm(distanceKm, minutes)}{steps > 0 ? ` · Pasos: ${steps.toLocaleString('es-MX')}` : ''}</p>
           {routeMap}
-          <Btn variant="coral" className="w-full" onClick={() => onSave({ sport, durationMin: Math.max(1, Math.round(minutes)), distanceKm: Math.round(distanceKm * 100) / 100, route: points })}>
+          <Btn variant="coral" className="w-full" onClick={() => onSave({ sport, durationMin: Math.max(1, Math.round(minutes)), distanceKm: Math.round(distanceKm * 100) / 100, route: points, steps: steps > 0 ? steps : undefined })}>
             Guardar entrenamiento
           </Btn>
-          <button className="w-full text-center text-sm text-slate-500 underline" onClick={() => { setStatus('idle'); setSeconds(0); setDistanceKm(0); setPoints([]) }}>
+          <button className="w-full text-center text-sm text-slate-500 underline" onClick={() => { setStatus('idle'); setSeconds(0); setDistanceKm(0); setPoints([]); setSteps(0); stepsRef.current = 0 }}>
             Descartar y volver a grabar
           </button>
         </div>
