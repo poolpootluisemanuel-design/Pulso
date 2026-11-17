@@ -1,8 +1,10 @@
-import type { Challenge, Workout } from '../lib/types'
+import type { Business, Challenge, Workout } from '../lib/types'
 import { computeMedals, computeStreak } from '../lib/utils'
+import { isChallengeCompleted } from '../lib/challengePrizes'
+import ChallengePrize from './ChallengePrize'
 import { Card, Empty } from './ui'
 
-export default function Challenges({ workouts, challenges }: { workouts: Workout[]; challenges: Challenge[] }) {
+export default function Challenges({ workouts, challenges, businesses = [] }: { workouts: Workout[]; challenges: Challenge[]; businesses?: Business[] }) {
   const streak = computeStreak(workouts)
   const medals = computeMedals(workouts)
   const totalKm = workouts.reduce((s, w) => s + (w.distance_km || 0), 0)
@@ -41,6 +43,11 @@ export default function Challenges({ workouts, challenges }: { workouts: Workout
                   <div className="h-full bg-teal" style={{ width: `${pct}%` }} />
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{progress}/{c.target_count} · {pct}%</p>
+                <ChallengePrize
+                  challenge={c}
+                  business={businesses.find((b) => b.id === c.business_id)}
+                  completed={isChallengeCompleted(c, workouts)}
+                />
               </Card>
             )
           })}

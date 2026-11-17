@@ -138,6 +138,9 @@ export async function syncOutbox(): Promise<number> {
           beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
           ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
           ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
+          ...(p.is_coach !== undefined ? { is_coach: p.is_coach } : {}),
+          ...(p.coach_specialty !== undefined ? { coach_specialty: p.coach_specialty } : {}),
+          ...(p.coach_experience !== undefined ? { coach_experience: p.coach_experience } : {}),
         }, { onConflict: 'id' })
         if (error) throw error
       } else if (op.kind === 'plan' && op.item) {
@@ -444,6 +447,10 @@ export async function saveProfile(p: Profile): Promise<void> {
         // Igual con is_blocked: un guardado normal no debe desbloquear
         // a nadie por accidente.
         ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
+        // Igual con el modo coach: solo se escribe si viene definido.
+        ...(p.is_coach !== undefined ? { is_coach: p.is_coach } : {}),
+        ...(p.coach_specialty !== undefined ? { coach_specialty: p.coach_specialty } : {}),
+        ...(p.coach_experience !== undefined ? { coach_experience: p.coach_experience } : {}),
       }))
       if (error) throw new Error(error.message)
     } catch (e) {
@@ -492,6 +499,9 @@ function rowToProfile(r: Record<string, unknown>): Profile {
     photo_url: (r.photo_url as string) || undefined,
     is_admin: Boolean(r.is_admin),
     is_blocked: Boolean(r.is_blocked),
+    is_coach: Boolean(r.is_coach),
+    coach_specialty: (r.coach_specialty as string) || undefined,
+    coach_experience: (r.coach_experience as string) || undefined,
   }
 }
 

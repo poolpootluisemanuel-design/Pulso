@@ -88,6 +88,7 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
 
       {showGps ? (
         <GpsTracker
+          profile={profile}
           onProgress={setGps}
           onCancel={() => { setShowGps(false); onGuideDone?.() }}
           guide={guideRoute}

@@ -1,7 +1,10 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Level, Profile, Rsvp, SessionItem } from '../lib/types'
 import { LEVELS, SPORTS, ZONES } from '../lib/types'
 import { cancelRsvp, createSession, joinSession, listRsvps } from '../lib/store'
+import { subscribeLiveTrainers, type LiveTrainer } from '../lib/liveTraining'
+import SessionChat from './SessionChat'
+import LiveTrainingLayer, { liveTrainersToMarkers } from './LiveTrainingLayer'
 import { formatDate, todayISO, weekdayName } from '../lib/utils'
 import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
 // El mapa (MapLibre, ~1 MB) solo se descarga cuando se abre la vista
@@ -38,10 +41,20 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [rsvps, setRsvps] = useState<Record<string, Rsvp[]>>({})
+  // Chat de la sesión abierta (solo una a la vez).
+  const [openChatId, setOpenChatId] = useState<string | null>(null)
+  // Mapa en vivo: quién entrena ahora (opt-in, presencia efímera).
+  const [liveTrainers, setLiveTrainers] = useState<LiveTrainer[]>([])
+  const [showLive, setShowLive] = useState(true)
   // Vista Lista / Mapa y ubicación del lugar al crear la sesión.
   const [view, setView] = useState<'lista' | 'mapa'>('lista')
   // Dentro del mapa: sesiones con ubicación o rutas recomendadas.
   const [mapMode, setMapMode] = useState<'sesiones' | 'rutas'>('sesiones')
+  // Suscripción al mapa en vivo: solo en vista mapa + modo sesiones.
+  useEffect(() => {
+    if (view !== 'mapa' || mapMode !== 'sesiones') return
+    return subscribeLiveTrainers(setLiveTrainers)
+  }, [view, mapMode])
   const [selectedRoute, setSelectedRoute] = useState<RecommendedRoute | null>(null)
   // Centro del mapa: GPS del usuario si ya dio permiso, si no su zona
   // (Isla Mujeres si es su zona), nunca siempre Cancún centro.
@@ -218,8 +231,9 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
             <Empty text="Ninguna sesión tiene ubicación en el mapa todavía. Al crear una, toca «Usar mi ubicación» estando en el lugar." />
           ) : (
             <>
+              <LiveTrainingLayer trainers={liveTrainers} visible={showLive} onToggle={setShowLive} selfProfileId={profile.id} />
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                <MapView center={mapCenter} markers={markers} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                <MapView center={mapCenter} markers={[...markers, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
               </Suspense>
               <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
             </>
@@ -269,6 +283,12 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                   <button className="text-sm font-semibold text-teal-dark underline" onClick={() => loadRsvps(s.id)}>
                     Ver quién va ({confirmed})
                   </button>
+                  <button className="text-sm font-semibold text-teal-dark underline" onClick={async () => {
+                    await loadRsvps(s.id)
+                    setOpenChatId(openChatId === s.id ? null : s.id)
+                  }}>
+                    💬 Chat
+                  </button>
                   {!mine && (
                     <Btn variant="teal" className="px-3 py-1.5 text-sm" onClick={async () => {
                       setErr('')
@@ -285,6 +305,17 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                     </button>
                   )}
                 </div>
+                {openChatId === s.id && (
+                  <div className="mt-3">
+                    <SessionChat
+                      sessionId={s.id}
+                      sessionTitle={s.title}
+                      profileId={profile.id}
+                      profileName={profile.name}
+                      isParticipant={s.host_id === profile.id || list?.find((r) => r.profile_id === profile.id)?.status === 'confirmed'}
+                    />
+                  </div>
+                )}
               </Card>
             )
           })}

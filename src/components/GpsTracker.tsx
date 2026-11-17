@@ -7,6 +7,8 @@ import { isNative } from '../lib/native'
 import { getNativeCurrentPosition, startNativeWatch, stopNativeWatch } from '../lib/nativeGps'
 import { getTodaySteps, healthAvailable, openHealthConnectSettings, requestStepsAccess } from '../lib/healthConnect'
 import { Btn, Card } from './ui'
+import LiveTrainingToggle from './LiveTrainingToggle'
+import type { Profile } from '../lib/types'
 // El mapa (MapLibre, ~1 MB) solo se descarga cuando se muestra uno,
 // no en la primera carga de la app: Entrenar abre sin esperarlo.
 const MapView = lazy(() => import('./MapView'))
@@ -52,7 +54,7 @@ export { GPS_SAVED_KEY }
  *  al volver queda en pausa, lista para reanudar donde iba.
  *  Con `guide` (ruta recomendada elegida en Sesiones → Mapa), la ruta
  *  se dibuja como línea teal punteada de referencia mientras grabas. */
-export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClearGuide }: { onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void; guide?: RecommendedRoute | null; onClearGuide?: () => void }) {
+export default function GpsTracker({ profile, onSave, onCancel, onProgress, guide, onClearGuide }: { profile?: Profile; onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void; guide?: RecommendedRoute | null; onClearGuide?: () => void }) {
   const savedRef = useRef<SavedGps | null>(null)
   if (savedRef.current === null) savedRef.current = loadSavedGps()
   const saved = savedRef.current
@@ -474,6 +476,15 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
     <Card>
       <h3 className="text-lg font-bold">Grabar con GPS</h3>
       <p className="mb-3 text-sm text-slate-500">Caminata, correr o ciclismo. Se guarda tu ruta, distancia y ritmo.</p>
+      {profile && (
+        <LiveTrainingToggle
+          profileId={profile.id}
+          profileName={profile.name}
+          sport={sport}
+          isRecording={status === 'recording'}
+          position={currentPos}
+        />
+      )}
       {guide && (
         <p className="mb-3 flex items-center justify-between gap-2 rounded-xl bg-teal/10 p-2 text-sm font-semibold text-teal-dark">
           <span>🗺️ Siguiendo ruta: {guide.name} — sigue la línea teal punteada.</span>

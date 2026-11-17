@@ -209,3 +209,58 @@ live. La primera compilación en Android Studio puede pedir ajustes
 - La mini-barra ya no trae el botón "Entrenar →" (la ▲ ya lleva a
   Entrenar) y el título es corto (deporte o nombre de la canción),
   así ya no se corta como "Músic…".
+
+## Las 5 funciones nuevas (chat, push, mapa en vivo, premios, coach)
+
+Todo en una sola operación, cableado en la app (`npm run build` en verde):
+
+1. **Chat de sesiones** (`src/lib/sessionChat.ts`, `src/components/SessionChat.tsx`):
+   botón 💬 Chat en cada sesión de la lista. Solo participantes
+   confirmados y el anfitrión pueden escribir; los demás lo ven en
+   solo lectura. Supabase Realtime + polling cada 5 s + cola offline
+   (outbox). Migración: `supabase/migration_session_messages.sql`
+   (incluye `alter publication supabase_realtime add table`).
+2. **Notificaciones push** (`src/lib/pushNotifications.ts`,
+   `@capacitor/push-notifications`): se registra el token FCM una
+   vez por sesión tras el login (`App.tsx`). Migración:
+   `supabase/migration_push_tokens.sql`. **Pendiente de Luis (sin
+   esto no llega ninguna push):** seguir `docs-push-firebase.md`
+   (crear proyecto Firebase, app Android `com.pulso.app`, bajar
+   `google-services.json` a `android/app/`, `npx cap sync android`).
+   Tampoco existe aún un servidor que envíe las push (habría que
+   leer `push_tokens` y llamar a FCM al haber sesión/reto nuevo).
+3. **Mapa en vivo** (`src/lib/liveTraining.ts`,
+   `src/components/LiveTrainingLayer.tsx`,
+   `src/components/LiveTrainingToggle.tsx`): en Sesiones → Mapa,
+   capa "🔴 Entrenando ahora (N)". Presencia efímera por Supabase
+   Realtime Presence, sin escribir en ninguna tabla. Opt-in
+   explícito en Entrenar → Grabar con GPS ("📍 Que se me vea
+   entrenando ahora", apagado por defecto); se publica solo
+   mientras graba y se quita al terminar/pausar (o a los 60 s sin
+   actualizar). Caveat: al entrar/salir un entrenador, `MapView`
+   puede recentrar el mapa (su `fitBounds` depende de los
+   marcadores).
+4. **Retos con premios** (`src/lib/challengePrizes.ts`,
+   `src/components/ChallengePrize.tsx`): un reto puede tener
+   `prize_text` + `business_id` (migración
+   `supabase/migration_challenge_prizes.sql`, update solo-admin).
+   En Retos se ve "🎁 Premio al completarlo" o "🏆 Premio" con el
+   negocio. Pendiente: no hay `createChallenge`/`updateChallenge`
+   ni formulario en Admin, así que hoy el premio se asigna por SQL
+   (`update challenges set prize_text='...', business_id='...'
+   where id='...';`). Además la regla de "completado" hereda el
+   defecto de `Challenges.tsx`: cuenta todos los entrenamientos,
+   sin filtrar por la ventana del reto ni `target_km`.
+5. **Modo coach** (`src/lib/coachMode.ts`,
+   `src/components/CoachPanel.tsx`): en Perfil, "¿Eres coach?"
+   (especialidad + experiencia). El coach ve estadísticas
+   (sesiones, asistentes, próximas), sus alumnos (participantes
+   confirmados de sus sesiones) y crea clases/sesiones. Sin pagos.
+   Migración: `supabase/migration_coach_mode.sql`
+   (`is_coach`, `coach_specialty`, `coach_experience`).
+
+**Migraciones a correr en Supabase → SQL Editor (una vez cada una,
+en cualquier orden):** `migration_session_messages.sql`,
+`migration_push_tokens.sql`, `migration_challenge_prizes.sql`,
+`migration_coach_mode.sql`. Sin correrlas, cada función cae a su
+modo local o no muestra su dato nuevo, sin romper la app.

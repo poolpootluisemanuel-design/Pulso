@@ -28,6 +28,12 @@ export interface Profile {
   /** Cuenta bloqueada por el admin: puede entrar y ver la app, pero
    *  no puede crear sesiones, publicar ni apuntarse a sesiones. */
   is_blocked?: boolean
+  /** Modo coach (columnas is_coach / coach_specialty /
+   *  coach_experience, migración supabase/migration_coach_mode.sql).
+   *  Un coach crea clases/sesiones y ve a sus alumnos. */
+  is_coach?: boolean
+  coach_specialty?: string
+  coach_experience?: string
 }
 
 export interface SessionItem {
@@ -78,6 +84,10 @@ export interface Challenge {
   target_count: number
   target_km?: number
   start_date: string
+  /** Premio del reto (migración supabase/migration_challenge_prizes.sql):
+   *  texto del premio y negocio local que lo da. */
+  prize_text?: string
+  business_id?: string
 }
 
 export type CoachGoal = 'resistencia' | 'fuerza' | 'tecnica' | 'constancia' | 'bajar_peso'

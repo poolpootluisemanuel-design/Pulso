@@ -10,6 +10,8 @@ import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
 import Tutorial, { hasSeenTutorial, markTutorialSeen } from './components/Tutorial'
 import PermissionsFlow from './components/PermissionsFlow'
+import CoachPanel from './components/CoachPanel'
+import { setupPushNotifications } from './lib/pushNotifications'
 import { hasSeenPermissionsFlow, markPermissionsFlowSeen } from './lib/permissions'
 import { isNative } from './lib/native'
 import type { TrainActivity } from './components/Train'
@@ -78,6 +80,16 @@ export default function App() {
     if (!hasSeenTutorial()) setShowTutorial(true)
     else if (isNative() && !hasSeenPermissionsFlow()) setShowPermissions(true)
   }, [user, profile])
+  // Notificaciones push (solo app nativa; en web setupPushNotifications
+  // devuelve null al instante y no hace nada). Una vez por sesión, sin
+  // bloquear el login: si no hay Firebase configurado, no se registra
+  // token y la app sigue igual (ver docs-push-firebase.md).
+  const pushSetupRef = useRef(false)
+  useEffect(() => {
+    if (!user || pushSetupRef.current) return
+    pushSetupRef.current = true
+    void setupPushNotifications(user.id).catch(() => undefined)
+  }, [user])
   useEffect(() => {
     const onUpdate = () => setUpdateAvailable(true)
     window.addEventListener('pulso-sw-update', onUpdate)
@@ -278,9 +290,12 @@ export default function App() {
         <div className={tab === 'entrenar' ? '' : 'hidden'}>
           <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
         </div>
-        {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
+        {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} businesses={businesses} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
-        {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} />}
+        {tab === 'perfil' && (<>
+          <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} />
+          <CoachPanel profile={profile} onCreateSession={() => setTab('sesiones')} />
+        </>)}
         {tab === 'admin' && admin && (
           <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
         )}
