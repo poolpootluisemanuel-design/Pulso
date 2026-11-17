@@ -9,12 +9,13 @@ import SessionsTab from './components/SessionsTab'
 import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
 import type { TrainActivity } from './components/Train'
-import { getCurrentUser, getProfile, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
+import AdminPanel from './components/AdminPanel'
+import { getCurrentUser, getProfile, isAdminUser, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
 import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
 
-type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil'
+type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil' | 'admin'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'inicio', label: 'Inicio', icon: '🏠' },
@@ -37,6 +38,9 @@ export default function App() {
   const [challenges, setChallenges] = useState<Challenge[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [businesses, setBusinesses] = useState<Business[]>([])
+  // Panel de administración: solo el dueño (su correo o is_admin).
+  const admin = isAdminUser(user, profile)
+  const [allWorkouts, setAllWorkouts] = useState<Workout[]>([])
   // La música empieza siempre recogida en mini-barra; solo se expande
   // cuando Luis la abre desde Entrenar. Al cambiar de pestaña se
   // recoge sola (ver MusicPlayer: compact la recoge).
@@ -82,6 +86,8 @@ export default function App() {
       ])
       setProfiles(ps); setSessions(ss); setChallenges(ch); setPosts(po); setBusinesses(bu)
       setWorkouts(await listWorkouts(me.id))
+      // Admin: entrenamientos de todos para las estadísticas del panel.
+      if (isAdminUser(me, prof)) setAllWorkouts(await listAllWorkouts())
       // Si algo se hizo sin internet, se sube ahora que hay red.
       if (navigator.onLine) setPending(await syncOutbox())
       else setPending(pendingSyncCount())
@@ -256,6 +262,9 @@ export default function App() {
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} />}
         {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
         {tab === 'perfil' && <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} />}
+        {tab === 'admin' && admin && (
+          <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} />
+        )}
       </main>
 
       {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
@@ -302,7 +311,7 @@ export default function App() {
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex max-w-2xl">
-          {TABS.map((t) => (
+          {[...TABS, ...(admin ? [{ id: 'admin' as Tab, label: 'Admin', icon: '🛠️' }] : [])].map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-1 flex-col items-center py-2 text-[11px] font-bold ${tab === t.id ? 'text-pulso' : 'text-slate-400'}`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}

@@ -16,8 +16,15 @@ create table if not exists profiles (
   sports jsonb not null default '[]',        -- [{sport, level}]
   availability text[] not null default '{}', -- ['lunes','martes',...]
   photo_url text,
+  is_admin boolean not null default false, -- permiso de admin (panel)
   created_at timestamptz not null default now()
 );
+-- Para bases ya creadas: se agrega sin borrar nada.
+alter table profiles add column if not exists is_admin boolean not null default false;
+-- El dueño de la app es admin en la base: sin esto, las políticas de
+-- admin de abajo no le aplicarían (su permiso en la app viene por su
+-- correo, pero RLS en Supabase solo ve la columna is_admin).
+update profiles set is_admin = true where email = 'pool.poot.luis.emanuel@gmail.com';
 
 -- Deportes y nivel por separado, para buscar por deporte/nivel en SQL.
 create table if not exists profile_sports (
@@ -156,6 +163,18 @@ create policy "crear perfil propio" on profiles for insert with check (auth.uid(
 drop policy if exists "cada quien edita su perfil" on profiles;
 create policy "cada quien edita su perfil" on profiles for all using (auth.uid() = id);
 
+-- Administración: un perfil con is_admin = true puede ver los
+-- entrenamientos de todos (estadísticas), borrar sesiones y
+-- publicaciones de cualquiera, y editar perfiles (para dar/quitar
+-- admin a otros). Sin correr este esquema en Supabase, el panel
+-- solo ve los datos propios (RLS). El dueño también entra al
+-- panel por su correo (código), pero borrar en Supabase exige
+-- is_admin = true en la base: el UPDATE de arriba se lo pone.
+drop policy if exists "admins editan perfiles" on profiles;
+create policy "admins editan perfiles" on profiles for update using (
+  exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
+);
+
 drop policy if exists "deportes visibles" on profile_sports;
 create policy "deportes visibles" on profile_sports for select using (true);
 drop policy if exists "crear deportes propios" on profile_sports;
@@ -171,6 +190,10 @@ drop policy if exists "sesiones editar propias" on sessions;
 create policy "sesiones editar propias" on sessions for update using (auth.uid() = host_id);
 drop policy if exists "sesiones borrar propias" on sessions;
 create policy "sesiones borrar propias" on sessions for delete using (auth.uid() = host_id);
+drop policy if exists "admins borran sesiones" on sessions;
+create policy "admins borran sesiones" on sessions for delete using (
+  exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
+);
 
 drop policy if exists "rsvps visibles" on rsvps;
 create policy "rsvps visibles" on rsvps for select using (true);
@@ -179,6 +202,10 @@ create policy "rsvps propios" on rsvps for all using (auth.uid() = profile_id);
 
 drop policy if exists "entrenamientos propios" on workouts;
 create policy "entrenamientos propios" on workouts for all using (auth.uid() = profile_id);
+drop policy if exists "admins ven entrenamientos" on workouts;
+create policy "admins ven entrenamientos" on workouts for select using (
+  exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
+);
 
 drop policy if exists "retos visibles" on challenges;
 create policy "retos visibles" on challenges for select using (true);
@@ -195,6 +222,10 @@ drop policy if exists "posts visibles" on posts;
 create policy "posts visibles" on posts for select using (true);
 drop policy if exists "posts propios" on posts;
 create policy "posts propios" on posts for all using (auth.uid() = profile_id);
+drop policy if exists "admins borran posts" on posts;
+create policy "admins borran posts" on posts for delete using (
+  exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
+);
 
 drop policy if exists "negocios visibles" on businesses;
 create policy "negocios visibles" on businesses for select using (true);

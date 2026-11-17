@@ -12,6 +12,17 @@ import { addDaysISO, legacyLocalHash, sha256, uid } from './utils'
 
 export const mode = supabaseConfigured ? 'supabase' : 'local'
 
+// ---------- Administración ----------
+// El dueño de la app es admin: por su correo (aunque is_admin sea
+// false en la base) o por la columna is_admin del perfil. El correo
+// del dueño NUNCA se muestra en la app: solo se compara aquí.
+export const OWNER_EMAIL = 'pool.poot.luis.emanuel@gmail.com'
+export function isAdminUser(user: AuthUser | null, profile: Profile | null): boolean {
+  if (!user) return false
+  if (user.email.trim().toLowerCase() === OWNER_EMAIL) return true
+  return profile?.is_admin === true
+}
+
 const LS = 'pulso_local_'
 
 interface LocalUser {
@@ -119,6 +130,7 @@ export async function syncOutbox(): Promise<number> {
         const { error } = await supabase.from('profiles').upsert({
           id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
           beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
+          ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
         }, { onConflict: 'id' })
         if (error) throw error
       } else if (op.kind === 'plan' && op.item) {
@@ -419,6 +431,9 @@ export async function saveProfile(p: Profile): Promise<void> {
       const { error } = await withTimeout(supabase.from('profiles').upsert({
         id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
         beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
+        // Solo se escribe is_admin si viene definido: si no, un perfil
+        // guardado normal borraría el permiso de admin en la base.
+        ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
       }))
       if (error) throw new Error(error.message)
     } catch (e) {
@@ -465,6 +480,7 @@ function rowToProfile(r: Record<string, unknown>): Profile {
     zone: String(r.zone || ''), bio: String(r.bio || ''), beginner: Boolean(r.beginner),
     sports: (r.sports as SportLevel[]) || [], availability: (r.availability as string[]) || [],
     photo_url: (r.photo_url as string) || undefined,
+    is_admin: Boolean(r.is_admin),
   }
 }
 
@@ -631,6 +647,48 @@ export async function deleteWorkout(id: string): Promise<void> {
     return
   }
   save('workouts', load<Workout[]>('workouts', []).filter((w) => w.id !== id))
+}
+
+// ---------- Administración (solo el dueño) ----------
+// Todos los entrenamientos de todos los usuarios (estadísticas del
+// panel). En Supabase requiere la política "admins ven
+// entrenamientos" (schema.sql): sin correr el esquema nuevo, RLS
+// solo devuelve los propios y el panel lo avisa.
+export async function listAllWorkouts(): Promise<Workout[]> {
+  if (supabaseConfigured && supabase) {
+    try {
+      const { data, error } = await withTimeout(supabase.from('workouts').select('*').order('date', { ascending: false }))
+      if (error) throw new Error(error.message)
+      return (data || []) as Workout[]
+    } catch {
+      return []
+    }
+  }
+  return load<Workout[]>('workouts', []).sort((a, b) => b.date.localeCompare(a.date))
+}
+
+/** Borrar una sesión (admin o su anfitrión, según RLS). */
+export async function deleteSession(id: string): Promise<void> {
+  if (supabaseConfigured && supabase) {
+    const { error } = await supabase.from('sessions').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return
+  }
+  save('sessions', load<SessionItem[]>('sessions', []).filter((s) => s.id !== id))
+  const cached = cacheGet<SessionItem[]>('sessions', [])
+  cacheSet('sessions', cached.filter((s) => s.id !== id))
+}
+
+/** Borrar una publicación del muro (admin o su autor, según RLS). */
+export async function deletePost(id: string): Promise<void> {
+  if (supabaseConfigured && supabase) {
+    const { error } = await supabase.from('posts').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return
+  }
+  save('posts', load<Post[]>('posts', []).filter((p) => p.id !== id))
+  const cached = cacheGet<Post[]>('posts', [])
+  cacheSet('posts', cached.filter((p) => p.id !== id))
 }
 
 // ---------- Retos, comunidad y negocios (estructura básica) ----------

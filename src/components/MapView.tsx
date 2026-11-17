@@ -123,6 +123,10 @@ export default function MapView({
   height = 220,
   follow = false,
   offlineNote,
+  // "Volver a la ruta": punto de la guía más cercano a ti + contador.
+  // Cuando el contador cambia, el mapa se centra en ese punto.
+  focus,
+  focusKey = 0,
   // Fondo por defecto: quien llama pasa 'satellite' en Isla Mujeres
   // (allí el oscuro es casi todo mar gris). Si el usuario ya eligió
   // un fondo, su elección guardada manda sobre el default.
@@ -139,6 +143,9 @@ export default function MapView({
   /** Texto que se muestra sin internet (cada uso pone el suyo). */
   offlineNote?: string
   defaultBasemap?: Basemap
+  /** Punto al que centrar el mapa cuando focusKey cambia. */
+  focus?: MapPoint | null
+  focusKey?: number
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -256,7 +263,22 @@ export default function MapView({
     }
   }, [points, guidePoints, follow])
 
-  // Marcadores: se limpian y se vuelven a poner en cada cambio.
+  // "Volver a la ruta": centrar el mapa en el punto de la guía más
+  // cercano a ti (el botón está en GpsTracker, que sube focusKey).
+  // Solo al cambiar focusKey: el punto cambia con cada fix GPS y
+  // recentrar en cada uno pelearía con el follow de la grabación.
+  const focusRef = useRef(focus)
+  focusRef.current = focus
+  const lastFocusKeyRef = useRef(0)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || focusKey === 0 || focusKey === lastFocusKeyRef.current) return
+    lastFocusKeyRef.current = focusKey
+    const f = focusRef.current
+    if (!f) return
+    map.easeTo({ center: [f.lng, f.lat], zoom: 16, duration: 600 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey])
   // La primera vez que llega un conjunto nuevo, se encuadra el mapa.
   useEffect(() => {
     const map = mapRef.current

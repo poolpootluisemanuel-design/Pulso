@@ -21,6 +21,10 @@ export interface Profile {
   sports: SportLevel[]
   availability: string[]
   photo_url?: string
+  /** Permiso de admin en la base de datos (columna is_admin).
+   *  El dueño también es admin por su correo (ver OWNER_EMAIL en
+   *  store.ts), aunque is_admin sea false. */
+  is_admin?: boolean
 }
 
 export interface SessionItem {

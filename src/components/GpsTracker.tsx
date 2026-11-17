@@ -1,6 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { haversineKm, paceMinKm } from '../lib/utils'
+import { computeNavigation, formatDistM } from '../lib/navigation'
 import type { RecommendedRoute } from '../lib/routes'
+import { routeDistanceKm } from '../lib/routes'
 import { Btn, Card } from './ui'
 // El mapa (MapLibre, ~1 MB) solo se descarga cuando se muestra uno,
 // no en la primera carga de la app: Entrenar abre sin esperarlo.
@@ -55,6 +57,37 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
   const [distanceKm, setDistanceKm] = useState(saved?.distanceKm || 0)
   const [error, setError] = useState(saved ? 'Tienes una grabación sin terminar. Toca Reanudar para seguir donde ibas.' : '')
   const [points, setPoints] = useState<Point[]>(saved?.points || [])
+  // Posición actual aceptada (ya pasó el filtro anti-deriva): es la
+  // que usa la navegación guiada, para no dar indicaciones con saltos.
+  const [currentPos, setCurrentPos] = useState<Point | null>(saved?.points?.length ? saved.points[saved.points.length - 1] : null)
+  // Navegación guiada: progreso, próximo giro y si te saliste de la ruta.
+  const nav = useMemo(
+    () => (guide && currentPos ? computeNavigation(currentPos, guide) : null),
+    [guide, currentPos],
+  )
+  // "Volver a la ruta": centra el mapa en el punto más cercano de la guía.
+  const [focusKey, setFocusKey] = useState(0)
+  // Indicaciones por voz (apagado por defecto): dice los giros con
+  // speechSynthesis, solo mientras grabas y solo cuando cambia la
+  // indicación, para no hablar encima de la música.
+  const [voiceOn, setVoiceOn] = useState(() => {
+    try { return localStorage.getItem('pulso_nav_voice') === '1' } catch { return false }
+  })
+  const lastSpokenRef = useRef('')
+  useEffect(() => {
+    if (!voiceOn || status !== 'recording' || !nav) return
+    if (nav.instruction === lastSpokenRef.current) return
+    lastSpokenRef.current = nav.instruction
+    try {
+      const synth = window.speechSynthesis
+      if (!synth) return
+      synth.cancel()
+      const u = new SpeechSynthesisUtterance(nav.instruction.replace(/^[^\w]+/u, ''))
+      u.lang = 'es-MX'
+      u.rate = 1
+      synth.speak(u)
+    } catch { /* sin voz en este navegador: la indicación sigue en pantalla */ }
+  }, [voiceOn, status, nav])
   // Pausa automática por estar parado: se detecta deriva del GPS (la
   // posición salta sola 5-15 m sin moverse, sobre todo en modo avión o
   // dentro de casa) y se deja de sumar distancia hasta moverse de verdad.
@@ -173,6 +206,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
         }
         lastPoint.current = next
         stillWindowDistKm.current += d
+        setCurrentPos(next)
         setDistanceKm((km) => km + d)
         setPoints((pts) => [...pts, next])
       },
@@ -213,6 +247,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
           // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
           // si no, este es el primer punto.
           if (points.length === 0) setPoints([p])
+          setCurrentPos(p)
           setStatus('recording')
           startWatch(p)
         })
@@ -232,6 +267,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
       (pos) => {
         acceptFirstFix(pos, (p) => {
           setPoints([p])
+          setCurrentPos(p)
           setStatus('recording')
           startWatch(p)
         })
@@ -269,6 +305,8 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
         markers={routeMarkers}
         height={260}
         follow
+        focus={nav?.nearestPoint}
+        focusKey={focusKey}
         defaultBasemap={guide?.zone === 'Isla Mujeres' ? 'satellite' : 'dark'}
         offlineNote="📶 Sin internet: el mapa no carga las calles, pero tu ruta se sigue grabando con GPS."
       />
@@ -291,7 +329,15 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
           {guide && (
             <div>
               {routeMap}
-              <p className="mt-1 text-center text-xs text-slate-500">La línea teal es la ruta recomendada. Tu recorrido se dibuja en rojo encima.</p>
+              <p className="mt-1 text-center text-xs text-slate-500">La línea teal es la ruta recomendada ({routeDistanceKm(guide).toFixed(1)} km aprox.). Tu recorrido se dibuja en rojo encima. Al iniciar te diré cuándo girar y cuánto falta.</p>
+              <label className="mt-2 flex items-center justify-center gap-2 text-sm font-semibold text-slate-700">
+                <input type="checkbox" checked={voiceOn} onChange={(e) => {
+                  const v = e.target.checked
+                  setVoiceOn(v)
+                  try { localStorage.setItem('pulso_nav_voice', v ? '1' : '0') } catch { /* noop */ }
+                }} />
+                🔊 Indicaciones por voz
+              </label>
             </div>
           )}
           <div className="flex gap-2">
@@ -310,6 +356,37 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
 
       {(status === 'recording' || status === 'paused') && (
         <div className="space-y-3">
+          {guide && nav && (
+            <div className="space-y-2 rounded-2xl bg-night p-3 text-white shadow-md">
+              <p className="text-xl font-black leading-tight">{nav.instruction}</p>
+              <div className="h-2 overflow-hidden rounded-full bg-white/20">
+                <div className="h-full rounded-full bg-pulso" style={{ width: `${nav.progressPct}%` }} />
+              </div>
+              <p className="text-sm font-semibold text-white/85">
+                {nav.progressKm.toFixed(2)} km de {nav.totalKm.toFixed(1)} km · faltan {nav.remainingKm.toFixed(2)} km ({Math.round(nav.progressPct)}%)
+              </p>
+              {nav.nextTurn && !nav.completed && !nav.offRoute && (
+                <p className="text-sm text-teal">
+                  Próximo giro: {nav.nextTurn.direction === 'vuelta' ? 'da la vuelta' : `a la ${nav.nextTurn.direction}`} en {formatDistM(nav.nextTurn.distanceM)}
+                </p>
+              )}
+              {nav.offRoute && (
+                <div className="space-y-2 rounded-xl bg-amber-400/20 p-2">
+                  <p className="text-sm font-bold text-amber-200">Estás a {Math.round(nav.distToRouteM)} m de la ruta. Sigue la línea teal en el mapa.</p>
+                  <Btn variant="teal" className="w-full" onClick={() => setFocusKey((k) => k + 1)}>📍 Volver a la ruta</Btn>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm font-semibold text-white/85">
+                <input type="checkbox" checked={voiceOn} onChange={(e) => {
+                  const v = e.target.checked
+                  setVoiceOn(v)
+                  try { localStorage.setItem('pulso_nav_voice', v ? '1' : '0') } catch { /* noop */ }
+                  if (!v) { try { window.speechSynthesis?.cancel() } catch { /* noop */ } }
+                }} />
+                🔊 Indicaciones por voz
+              </label>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-2 text-center">
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
             <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
