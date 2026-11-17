@@ -8,6 +8,7 @@ import type { GpsProgress } from './GpsTracker'
 import type { RecommendedRoute } from '../lib/routes'
 import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
+import ImportWorkout from './ImportWorkout'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
 
 function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; h?: number }) {
@@ -130,6 +131,11 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
           <Btn type="submit" variant="teal" className="w-full">Guardar entrenamiento</Btn>
         </form>
       </Card>
+
+      {/* Importar desde Strava / Garmin / Google Fit: el archivo se lee
+          en el teléfono, se muestra una vista previa y se guarda como
+          un entrenamiento normal (rachas, medallas y retos). */}
+      <ImportWorkout profile={profile} workouts={workouts} onRefresh={onRefresh} />
 
       <h3 className="text-lg font-bold">Tu historial</h3>
       {workouts.length === 0 ? <Empty text="Aún no hay entrenamientos. Graba tu primera caminata con GPS o regístrala manual." /> : (
