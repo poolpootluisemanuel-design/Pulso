@@ -6,13 +6,14 @@
 // entrenamientos" (schema.sql): si aún no se corrió el esquema
 // nuevo en Supabase, el panel avisa que solo ve los propios.
 import { useState } from 'react'
-import type { Business, Post, Profile, SessionItem, Workout } from '../lib/types'
-import { deletePost, deleteSession, mode } from '../lib/store'
+import type { AuthUser, Business, Post, Profile, SessionItem, Workout } from '../lib/types'
+import { ZONES } from '../lib/types'
+import { deletePost, deleteSession, mode, setUserBlocked, updateProfileAsAdmin } from '../lib/store'
 import { formatDate } from '../lib/utils'
-import { Btn, Card, Empty, Tag } from './ui'
+import { Btn, Card, Empty, Tag, inputCls, selectCls } from './ui'
 
 export default function AdminPanel({
-  profiles, sessions, posts, businesses, allWorkouts, dbAdmin, onRefresh,
+  profiles, sessions, posts, businesses, allWorkouts, dbAdmin, onRefresh, adminUser, adminProfile, currentUserId,
 }: {
   profiles: Profile[]
   sessions: SessionItem[]
@@ -22,10 +23,21 @@ export default function AdminPanel({
   /** is_admin en la base (distinto del acceso por correo del dueño). */
   dbAdmin: boolean
   onRefresh: () => void
+  /** El admin que está usando el panel (para no bloquearse a sí mismo). */
+  adminUser: AuthUser
+  adminProfile: Profile
+  currentUserId: string
 }) {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [blockConfirmId, setBlockConfirmId] = useState<string | null>(null)
+  // Edición de perfil (admin): nombre, zona y bio. Correo y contraseña
+  // no se editan desde el panel.
+  const [editing, setEditing] = useState<Profile | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editZone, setEditZone] = useState('')
+  const [editBio, setEditBio] = useState('')
   const totalKm = allWorkouts.reduce((s, w) => s + (w.distance_km || 0), 0)
 
   async function removeSession(id: string) {
@@ -47,6 +59,35 @@ export default function AdminPanel({
     } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo eliminar la publicación.') }
   }
 
+  function startEdit(p: Profile) {
+    setErr(''); setMsg('')
+    setEditing(p)
+    setEditName(p.name)
+    setEditZone(p.zone)
+    setEditBio(p.bio || '')
+  }
+
+  async function saveEdit() {
+    if (!editing) return
+    setErr(''); setMsg('')
+    try {
+      await updateProfileAsAdmin(adminUser, adminProfile, editing, { name: editName, zone: editZone, bio: editBio })
+      setMsg(`Perfil de ${editName.trim()} actualizado.`)
+      setEditing(null)
+      onRefresh()
+    } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo guardar el perfil.') }
+  }
+
+  async function toggleBlock(p: Profile) {
+    setErr(''); setMsg('')
+    try {
+      await setUserBlocked(adminUser, adminProfile, p, !p.is_blocked)
+      setMsg(p.is_blocked ? `${p.name} desbloqueado: ya puede crear sesiones, publicar y apuntarse.` : `${p.name} bloqueado: ya no puede crear sesiones, publicar ni apuntarse.`)
+      setBlockConfirmId(null)
+      onRefresh()
+    } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo cambiar el bloqueo.') }
+  }
+
   const stats: { label: string; value: string }[] = [
     { label: 'Usuarios', value: String(profiles.length) },
     { label: 'Sesiones', value: String(sessions.length) },
@@ -59,10 +100,10 @@ export default function AdminPanel({
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-black text-teal-dark">🛠️ Administración</h2>
-      <p className="text-sm text-slate-500">Solo tú ves este panel. Aquí ves cómo va PULSO y puedes moderar sesiones y publicaciones.</p>
+      <p className="text-sm text-slate-500">Solo tú ves este panel. Aquí ves cómo va PULSO y puedes moderar sesiones y publicaciones, bloquear usuarios y editar sus perfiles.</p>
       {mode === 'supabase' && !dbAdmin && (
         <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-          ⚠️ Entras al panel por ser el dueño, pero en la base aún no tienes el permiso de admin: para ver los entrenamientos de todos y borrar sesiones o publicaciones de otros, corre el esquema actualizado (supabase/schema.sql) en el SQL Editor de Supabase. Sin eso, los borrados de otros pueden fallar.
+          ⚠️ Entras al panel por ser el dueño, pero en la base aún no tienes el permiso de admin: para ver los entrenamientos de todos, borrar sesiones o publicaciones de otros y bloquear o editar usuarios, corre el esquema actualizado (supabase/schema.sql) en el SQL Editor de Supabase. Sin eso, esas acciones pueden fallar.
         </p>
       )}
       {err && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{err}</p>}
@@ -79,17 +120,59 @@ export default function AdminPanel({
 
       <Card>
         <h3 className="mb-2 text-lg font-bold">👥 Usuarios ({profiles.length})</h3>
+        <p className="mb-2 text-xs text-slate-500">Bloquear: el usuario sigue entrando y viendo la app, pero no puede crear sesiones, publicar ni apuntarse. El admin no puede bloquearse a sí mismo ni a otro admin.</p>
         {profiles.length === 0 ? <Empty text="Aún no hay usuarios." /> : (
           <ul className="space-y-2">
-            {profiles.map((p) => (
-              <li key={p.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-sage-50 p-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal text-sm font-black text-white">{p.name.slice(0, 1).toUpperCase()}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{p.name} {p.is_admin ? <span className="rounded-full bg-pulso/10 px-2 py-0.5 text-[11px] font-bold text-pulso">Admin</span> : null}</p>
-                  <p className="text-xs text-slate-500">{p.zone}{p.sports.length ? ` · ${p.sports.map((s) => s.sport).join(', ')}` : ''}</p>
-                </div>
-              </li>
-            ))}
+            {profiles.map((p) => {
+              const isSelf = p.id === currentUserId
+              const canBlock = !isSelf && !p.is_admin
+              return (
+                <li key={p.id} className="rounded-xl bg-sage-50 p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal text-sm font-black text-white">{p.name.slice(0, 1).toUpperCase()}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold">
+                        {p.name}{' '}
+                        {p.is_admin ? <span className="rounded-full bg-pulso/10 px-2 py-0.5 text-[11px] font-bold text-pulso">Admin</span> : null}{' '}
+                        {p.is_blocked ? <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">🚫 Bloqueado</span> : null}
+                      </p>
+                      <p className="text-xs text-slate-500">{p.zone}{p.sports.length ? ` · ${p.sports.map((s) => s.sport).join(', ')}` : ''}</p>
+                    </div>
+                    <div className="flex gap-1">
+                      {(!p.is_admin || isSelf) && (
+                        <button className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold" onClick={() => startEdit(p)}>Editar</button>
+                      )}
+                      {canBlock && blockConfirmId !== p.id && (
+                        <button className="rounded-full bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700" onClick={() => setBlockConfirmId(p.id)}>
+                          {p.is_blocked ? 'Desbloquear' : 'Bloquear'}
+                        </button>
+                      )}
+                      {canBlock && blockConfirmId === p.id && (
+                        <span className="flex gap-1">
+                          <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-white" onClick={() => void toggleBlock(p)}>{p.is_blocked ? 'Sí, desbloquear' : 'Sí, bloquear'}</button>
+                          <button className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold" onClick={() => setBlockConfirmId(null)}>Cancelar</button>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {editing?.id === p.id && (
+                    <div className="mt-3 space-y-2 rounded-xl bg-white p-3">
+                      <p className="text-sm font-bold">Editar perfil de {p.name}</p>
+                      <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre" aria-label="Nombre" />
+                      <select className={selectCls} value={editZone} onChange={(e) => setEditZone(e.target.value)} aria-label="Zona">
+                        {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
+                      </select>
+                      <textarea className={inputCls} value={editBio} onChange={(e) => setEditBio(e.target.value)} placeholder="Bio (opcional)" rows={2} aria-label="Bio" />
+                      <p className="text-xs text-slate-500">El correo y la contraseña no se cambian desde el panel.</p>
+                      <div className="flex gap-2">
+                        <Btn variant="teal" className="flex-1" onClick={() => void saveEdit()}>Guardar cambios</Btn>
+                        <Btn variant="ghost" className="flex-1" onClick={() => setEditing(null)}>Cancelar</Btn>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </Card>

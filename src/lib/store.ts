@@ -131,6 +131,7 @@ export async function syncOutbox(): Promise<number> {
           id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
           beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
           ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
+          ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
         }, { onConflict: 'id' })
         if (error) throw error
       } else if (op.kind === 'plan' && op.item) {
@@ -434,6 +435,9 @@ export async function saveProfile(p: Profile): Promise<void> {
         // Solo se escribe is_admin si viene definido: si no, un perfil
         // guardado normal borraría el permiso de admin en la base.
         ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
+        // Igual con is_blocked: un guardado normal no debe desbloquear
+        // a nadie por accidente.
+        ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
       }))
       if (error) throw new Error(error.message)
     } catch (e) {
@@ -481,7 +485,65 @@ function rowToProfile(r: Record<string, unknown>): Profile {
     sports: (r.sports as SportLevel[]) || [], availability: (r.availability as string[]) || [],
     photo_url: (r.photo_url as string) || undefined,
     is_admin: Boolean(r.is_admin),
+    is_blocked: Boolean(r.is_blocked),
   }
+}
+
+// ---------- Bloqueo de usuarios (admin) ----------
+// Un usuario bloqueado puede entrar y ver la app, pero no puede crear
+// sesiones, publicar en comunidad ni apuntarse a sesiones. El bloqueo
+// se comprueba en store (createSession / createPost / joinSession),
+// así que vale en Supabase y en modo local. El admin no puede
+// bloquearse a sí mismo ni bloquear a otro admin: lo protege el
+// propio panel y también estas funciones.
+export const BLOCKED_MSG = 'Tu cuenta está bloqueada. Contacta al administrador.'
+
+async function assertNotBlocked(profileId: string): Promise<void> {
+  const p = await getProfile(profileId)
+  if (p?.is_blocked) throw new Error(BLOCKED_MSG)
+}
+
+function assertAdmin(adminUser: AuthUser | null, adminProfile: Profile | null): void {
+  if (!isAdminUser(adminUser, adminProfile)) throw new Error('Solo el administrador puede hacer esto.')
+}
+
+/** Bloquea o desbloquea a un usuario (solo admin). */
+export async function setUserBlocked(adminUser: AuthUser, adminProfile: Profile, target: Profile, blocked: boolean): Promise<void> {
+  assertAdmin(adminUser, adminProfile)
+  if (target.id === adminUser.id) throw new Error('No puedes bloquearte a ti mismo.')
+  if (target.is_admin) throw new Error('No puedes bloquear a otro administrador.')
+  if (supabaseConfigured && supabase) {
+    const { error } = await withTimeout(supabase.from('profiles').update({ is_blocked: blocked }).eq('id', target.id))
+    if (error) throw new Error(error.message)
+    cacheSet('profile_' + target.id, { ...target, is_blocked: blocked })
+    return
+  }
+  const profiles = load<Profile[]>('profiles', [])
+  const i = profiles.findIndex((x) => x.id === target.id)
+  if (i >= 0) { profiles[i] = { ...profiles[i], is_blocked: blocked }; save('profiles', profiles) }
+}
+
+/** Edita nombre, zona y bio de un usuario (solo admin). No se edita
+ *  correo ni contraseña desde el panel. Tampoco se edita a otro admin. */
+export async function updateProfileAsAdmin(adminUser: AuthUser, adminProfile: Profile, target: Profile, patch: { name: string; zone: string; bio: string }): Promise<void> {
+  assertAdmin(adminUser, adminProfile)
+  if (target.is_admin && target.id !== adminUser.id) throw new Error('No puedes editar a otro administrador.')
+  const name = patch.name.trim()
+  if (!name) throw new Error('El nombre no puede quedar vacío.')
+  const updated: Profile = { ...target, name, zone: patch.zone, bio: patch.bio.trim() }
+  // Update directo, no upsert: el upsert exige la política de insert
+  // propia (auth.uid() = id) y el admin editando a otro sería
+  // rechazado por RLS. El update lo cubre la política
+  // "admins editan perfiles" de schema.sql.
+  if (supabaseConfigured && supabase) {
+    const { error } = await withTimeout(supabase.from('profiles').update({ name, zone: patch.zone, bio: patch.bio.trim() }).eq('id', target.id))
+    if (error) throw new Error(error.message)
+    cacheSet('profile_' + target.id, updated)
+    return
+  }
+  const profiles = load<Profile[]>('profiles', [])
+  const i = profiles.findIndex((x) => x.id === target.id)
+  if (i >= 0) { profiles[i] = updated; save('profiles', profiles) }
 }
 
 // ---------- Sesiones ----------
@@ -511,6 +573,7 @@ export async function listSessions(): Promise<SessionItem[]> {
 }
 
 export async function createSession(s: Omit<SessionItem, 'id'>): Promise<SessionItem> {
+  await assertNotBlocked(s.host_id)
   const item: SessionItem = { ...s, id: uid() }
   if (supabaseConfigured && supabase) {
     try {
@@ -558,6 +621,7 @@ export async function listRsvps(sessionId: string): Promise<Rsvp[]> {
 }
 
 export async function joinSession(session: SessionItem, profileId: string): Promise<'confirmed' | 'waitlist'> {
+  await assertNotBlocked(profileId)
   const rsvps = await listRsvps(session.id)
   if (rsvps.some((r) => r.profile_id === profileId)) throw new Error('Ya estás apuntado en esta sesión.')
   const confirmed = rsvps.filter((r) => r.status === 'confirmed').length
@@ -725,6 +789,7 @@ export async function listPosts(): Promise<Post[]> {
 }
 
 export async function createPost(profileId: string, authorName: string, text: string): Promise<Post> {
+  await assertNotBlocked(profileId)
   const post: Post = { id: uid(), profile_id: profileId, author_name: authorName, text: text.trim(), created_at: new Date().toISOString() }
   if (!post.text) throw new Error('Escribe algo para publicar.')
   if (supabaseConfigured && supabase) {

@@ -17,10 +17,12 @@ create table if not exists profiles (
   availability text[] not null default '{}', -- ['lunes','martes',...]
   photo_url text,
   is_admin boolean not null default false, -- permiso de admin (panel)
+  is_blocked boolean not null default false, -- cuenta bloqueada por el admin
   created_at timestamptz not null default now()
 );
 -- Para bases ya creadas: se agrega sin borrar nada.
 alter table profiles add column if not exists is_admin boolean not null default false;
+alter table profiles add column if not exists is_blocked boolean not null default false;
 -- El dueño de la app es admin en la base: sin esto, las políticas de
 -- admin de abajo no le aplicarían (su permiso en la app viene por su
 -- correo, pero RLS en Supabase solo ve la columna is_admin).

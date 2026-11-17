@@ -25,6 +25,9 @@ export interface Profile {
    *  El dueño también es admin por su correo (ver OWNER_EMAIL en
    *  store.ts), aunque is_admin sea false. */
   is_admin?: boolean
+  /** Cuenta bloqueada por el admin: puede entrar y ver la app, pero
+   *  no puede crear sesiones, publicar ni apuntarse a sesiones. */
+  is_blocked?: boolean
 }
 
 export interface SessionItem {

@@ -271,9 +271,12 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                   </button>
                   {!mine && (
                     <Btn variant="teal" className="px-3 py-1.5 text-sm" onClick={async () => {
-                      const st = await joinSession(s, profile.id)
-                      setMsg(st === 'confirmed' ? '¡Confirmado! Te esperamos.' : 'Cupo lleno, quedaste en lista de espera. Te avisamos si se libera un lugar.')
-                      await loadRsvps(s.id)
+                      setErr('')
+                      try {
+                        const st = await joinSession(s, profile.id)
+                        setMsg(st === 'confirmed' ? '¡Confirmado! Te esperamos.' : 'Cupo lleno, quedaste en lista de espera. Te avisamos si se libera un lugar.')
+                        await loadRsvps(s.id)
+                      } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No te pudiste apuntar.') }
                     }}>Me apunto</Btn>
                   )}
                   {mine && (
