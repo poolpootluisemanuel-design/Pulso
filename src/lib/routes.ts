@@ -22,6 +22,32 @@ export interface RecommendedRoute {
 
 // Centro por defecto: Cancún centro.
 export const CANCUN_CENTER: RoutePoint = { lat: 21.1619, lng: -86.8515 }
+// Centro de Isla Mujeres: en el mapa oscuro casi todo es mar gris,
+// por eso allí el mapa arranca en satélite (ver MapView).
+export const ISLA_MUJERES_CENTER: RoutePoint = { lat: 21.25, lng: -86.72 }
+
+export const ZONE_CENTERS: Record<string, RoutePoint> = {
+  'Cancún centro': CANCUN_CENTER,
+  'Isla Mujeres': ISLA_MUJERES_CENTER,
+  'Zona Hotelera': { lat: 21.12, lng: -86.77 },
+  'Puerto Cancún': { lat: 21.17, lng: -86.80 },
+  'Playa del Carmen': { lat: 20.62, lng: -87.07 },
+  'Puerto Morelos': { lat: 20.84, lng: -86.87 },
+  'Tulum': { lat: 20.21, lng: -87.43 },
+  'Riviera Maya': { lat: 20.62, lng: -87.07 },
+  'Cozumel': { lat: 20.51, lng: -86.95 },
+}
+
+export function zoneCenter(zone: string): RoutePoint {
+  return ZONE_CENTERS[zone] || CANCUN_CENTER
+}
+
+/** Rutas de una zona primero, luego las demás (mismo orden dentro). */
+export function routesSortedByZone(zone: string): RecommendedRoute[] {
+  const mine = RECOMMENDED_ROUTES.filter((r) => r.zone === zone)
+  const rest = RECOMMENDED_ROUTES.filter((r) => r.zone !== zone)
+  return [...mine, ...rest]
+}
 
 export function routeDistanceKm(route: RecommendedRoute): number {
   let total = 0
@@ -80,6 +106,77 @@ export const RECOMMENDED_ROUTES: RecommendedRoute[] = [
       { lat: 21.2450, lng: -86.7190 },
       { lat: 21.2380, lng: -86.7145 },
       { lat: 21.2335, lng: -86.7120 },
+    ],
+  },
+  {
+    id: 'isla-playa-norte',
+    name: 'Isla Mujeres · Playa Norte',
+    zone: 'Isla Mujeres',
+    difficulty: 'Fácil',
+    surface: 'Arena compacta y malecón',
+    elevationGainM: 5,
+    blurb: 'Vuelta por la punta norte de la isla, por Playa Norte: arena blanca, agua turquesa y sombra en el malecón.',
+    points: [
+      { lat: 21.2608, lng: -86.7395 },
+      { lat: 21.2632, lng: -86.7345 },
+      { lat: 21.2620, lng: -86.7295 },
+      { lat: 21.2590, lng: -86.7280 },
+      { lat: 21.2580, lng: -86.7325 },
+      { lat: 21.2608, lng: -86.7395 },
+    ],
+  },
+  {
+    id: 'isla-sac-bajo',
+    name: 'Isla Mujeres · Sac Bajo a Punta Sur',
+    zone: 'Isla Mujeres',
+    difficulty: 'Media',
+    surface: 'Asfalto',
+    elevationGainM: 18,
+    blurb: 'Del sur de la isla hasta Punta Sur, donde se ve el amanecer primero en México. Hay subida suave al final.',
+    points: [
+      { lat: 21.2360, lng: -86.7160 },
+      { lat: 21.2310, lng: -86.7110 },
+      { lat: 21.2260, lng: -86.7060 },
+      { lat: 21.2215, lng: -86.7010 },
+      { lat: 21.2185, lng: -86.6975 },
+    ],
+  },
+  {
+    id: 'isla-la-gloria',
+    name: 'Isla Mujeres · Centro a La Gloria',
+    zone: 'Isla Mujeres',
+    difficulty: 'Fácil',
+    surface: 'Asfalto',
+    elevationGainM: 8,
+    blurb: 'Por la avenida principal del lado oeste, del centro a la colonia La Gloria: plano, con tienditas y gente local.',
+    points: [
+      { lat: 21.2565, lng: -86.7355 },
+      { lat: 21.2510, lng: -86.7330 },
+      { lat: 21.2460, lng: -86.7305 },
+      { lat: 21.2410, lng: -86.7280 },
+      { lat: 21.2365, lng: -86.7245 },
+    ],
+  },
+  {
+    id: 'isla-vuelta-completa',
+    name: 'Isla Mujeres · Vuelta completa',
+    zone: 'Isla Mujeres',
+    difficulty: 'Exigente',
+    surface: 'Asfalto y malecón',
+    elevationGainM: 25,
+    blurb: 'La vuelta entera a la isla: bajas por el lado este hasta Punta Sur y regresas por el oeste. La ruta larga de la isla.',
+    points: [
+      { lat: 21.2615, lng: -86.7320 },
+      { lat: 21.2550, lng: -86.7260 },
+      { lat: 21.2470, lng: -86.7200 },
+      { lat: 21.2380, lng: -86.7130 },
+      { lat: 21.2290, lng: -86.7060 },
+      { lat: 21.2195, lng: -86.6985 },
+      { lat: 21.2280, lng: -86.7120 },
+      { lat: 21.2380, lng: -86.7200 },
+      { lat: 21.2480, lng: -86.7280 },
+      { lat: 21.2560, lng: -86.7350 },
+      { lat: 21.2615, lng: -86.7320 },
     ],
   },
   {

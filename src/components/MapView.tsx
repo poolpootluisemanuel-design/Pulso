@@ -43,25 +43,57 @@ export { CANCUN_CENTER }
 // curl: tiles reales de Cancún, 200). El fondo del canvas es azul noche
 // PULSO, así que sin tiles (offline) no se ve un hueco gris claro sino
 // el color de la app. Esri usa /tile/{z}/{y}/{x}.
-const DARK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    'esri-dark-base': {
-      type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
-      tileSize: 256,
-      attribution: '© Esri, HERE, Garmin, OpenStreetMap contributors',
+// PERO en Isla Mujeres el fondo oscuro es casi todo mar: verificado
+// con curl, el tile z14 de la isla da 200 con 1 solo color (mar gris
+// uniforme), mientras el satélite da 200 con 3.110 colores (tierra y
+// mar reales). Por eso hay fondo Satélite: Esri World Imagery, libre
+// y sin key, con capa de referencia (nombres) por encima.
+export type Basemap = 'dark' | 'satellite'
+const BASEMAP_KEY = 'pulso_map_basemap'
+
+function styleFor(basemap: Basemap): StyleSpecification {
+  if (basemap === 'satellite') {
+    return {
+      version: 8,
+      sources: {
+        'esri-sat': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri, Maxar, Earthstar Geographics',
+        },
+        'esri-sat-ref': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+        },
+      },
+      layers: [
+        { id: 'esri-sat', type: 'raster', source: 'esri-sat' },
+        { id: 'esri-sat-ref', type: 'raster', source: 'esri-sat-ref' },
+      ],
+    }
+  }
+  return {
+    version: 8,
+    sources: {
+      'esri-dark-base': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri, HERE, Garmin, OpenStreetMap contributors',
+      },
+      'esri-dark-ref': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+      },
     },
-    'esri-dark-ref': {
-      type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}'],
-      tileSize: 256,
-    },
-  },
-  layers: [
-    { id: 'esri-dark-base', type: 'raster', source: 'esri-dark-base' },
-    { id: 'esri-dark-ref', type: 'raster', source: 'esri-dark-ref' },
-  ],
+    layers: [
+      { id: 'esri-dark-base', type: 'raster', source: 'esri-dark-base' },
+      { id: 'esri-dark-ref', type: 'raster', source: 'esri-dark-ref' },
+    ],
+  }
 }
 
 function routeGeo(points: MapPoint[]): FeatureCollection {
@@ -91,6 +123,10 @@ export default function MapView({
   height = 220,
   follow = false,
   offlineNote,
+  // Fondo por defecto: quien llama pasa 'satellite' en Isla Mujeres
+  // (allí el oscuro es casi todo mar gris). Si el usuario ya eligió
+  // un fondo, su elección guardada manda sobre el default.
+  defaultBasemap = 'dark',
 }: {
   center?: MapPoint
   zoom?: number
@@ -102,6 +138,7 @@ export default function MapView({
   follow?: boolean
   /** Texto que se muestra sin internet (cada uso pone el suyo). */
   offlineNote?: string
+  defaultBasemap?: Basemap
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -110,6 +147,21 @@ export default function MapView({
   const [online, setOnline] = useState(() => navigator.onLine)
   const [is3d, setIs3d] = useState(false)
   const [webglFailed, setWebglFailed] = useState(false)
+  const [basemap, setBasemap] = useState<Basemap>(() => {
+    try {
+      const saved = localStorage.getItem(BASEMAP_KEY)
+      if (saved === 'dark' || saved === 'satellite') return saved
+    } catch { /* sin localStorage: usa el default */ }
+    return defaultBasemap
+  })
+  const basemapRef = useRef(basemap)
+  basemapRef.current = basemap
+  // Puntos actuales para re-dibujar la ruta cuando cambia el estilo
+  // (setStyle borra las capas propias: hay que volver a ponerlas).
+  const pointsRef = useRef<MapPoint[] | undefined>(points)
+  pointsRef.current = points
+  const guideRef = useRef<MapPoint[] | undefined>(guidePoints)
+  guideRef.current = guidePoints
 
   useEffect(() => {
     const goOnline = () => setOnline(true)
@@ -130,7 +182,7 @@ export default function MapView({
     try {
       map = new maplibregl.Map({
         container: el,
-        style: DARK_STYLE,
+        style: styleFor(basemapRef.current),
         center: [center.lng, center.lat],
         zoom,
         pitch: 0,
@@ -148,15 +200,27 @@ export default function MapView({
       return
     }
     map.on('webglcontextlost', () => setWebglFailed(true))
-    map.on('load', () => {
-      // Ruta grabada: rojo pulso con borde oscuro para que resalte
-      // sobre el mapa oscuro. Guía recomendada: teal punteada.
-      map.addSource('route', { type: 'geojson', data: routeGeo([]) })
-      map.addLayer({ id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': '#0A1B2E', 'line-width': 8, 'line-opacity': 0.9 } })
-      map.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-color': '#E63946', 'line-width': 4, 'line-opacity': 1 } })
-      map.addSource('guide', { type: 'geojson', data: routeGeo([]) })
-      map.addLayer({ id: 'guide', type: 'line', source: 'guide', paint: { 'line-color': '#14B8A6', 'line-width': 3, 'line-dasharray': [2, 2], 'line-opacity': 0.95 } })
-    })
+    // Capas propias (ruta roja + guía teal): setStyle las borra, así
+    // que se vuelven a poner en cada carga de estilo.
+    const addRouteLayers = () => {
+      if (!map.getSource('route')) {
+        map.addSource('route', { type: 'geojson', data: routeGeo([]) })
+        map.addLayer({ id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': '#0A1B2E', 'line-width': 8, 'line-opacity': 0.9 } })
+        map.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-color': '#E63946', 'line-width': 4, 'line-opacity': 1 } })
+      }
+      if (!map.getSource('guide')) {
+        map.addSource('guide', { type: 'geojson', data: routeGeo([]) })
+        map.addLayer({ id: 'guide', type: 'line', source: 'guide', paint: { 'line-color': '#14B8A6', 'line-width': 3, 'line-dasharray': [2, 2], 'line-opacity': 0.95 } })
+      }
+      const pts = pointsRef.current
+      const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined
+      if (src) src.setData(routeGeo(pts && pts.length >= 2 ? pts : []))
+      const gd = guideRef.current
+      const gsrc = map.getSource('guide') as maplibregl.GeoJSONSource | undefined
+      if (gsrc) gsrc.setData(routeGeo(gd && gd.length >= 2 ? gd : []))
+    }
+    map.on('load', addRouteLayers)
+    map.on('style.load', addRouteLayers)
     mapRef.current = map
     // Entrenar se oculta con CSS al cambiar de pestaña (display:none):
     // el mapa nace con tamaño 0. Al volver a tener tamaño, se corrige.
@@ -232,6 +296,17 @@ export default function MapView({
     map.easeTo({ bearing: map.getBearing() + delta, pitch: 55, duration: 400 })
   }
 
+  // Cambiar fondo Oscuro / Satélite: se guarda la elección. En
+  // Isla Mujeres el satélite es el default porque el oscuro allí es
+  // casi todo mar gris; en satélite se ve la isla real.
+  function switchBasemap(next: Basemap) {
+    if (next === basemap) return
+    setBasemap(next)
+    try { localStorage.setItem(BASEMAP_KEY, next) } catch { /* sin localStorage */ }
+    const map = mapRef.current
+    if (map) map.setStyle(styleFor(next))
+  }
+
   if (webglFailed) {
     return (
       <div className="rounded-2xl bg-night p-4 text-center text-sm text-white/80" style={{ height }}>
@@ -247,6 +322,18 @@ export default function MapView({
       )}
       <div className="pulso-map relative w-full overflow-hidden rounded-2xl border border-night/20 shadow-md shadow-night/20" style={{ height }}>
         <div ref={containerRef} className="h-full w-full" style={{ background: '#0A1B2E' }} />
+        {/* Fondo del mapa: Oscuro o Satélite. En Isla Mujeres el
+            satélite es el default: en oscuro la isla es casi todo mar. */}
+        <div className="absolute left-2 top-2 z-10 flex gap-1.5">
+          <button type="button" onClick={() => switchBasemap('dark')} aria-label="Mapa oscuro"
+            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'dark' ? 'bg-pulso text-white' : 'bg-night/90 text-white'}`}>
+            🌙 Oscuro
+          </button>
+          <button type="button" onClick={() => switchBasemap('satellite')} aria-label="Mapa satélite"
+            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'satellite' ? 'bg-pulso text-white' : 'bg-night/90 text-white'}`}>
+            🛰️ Satélite
+          </button>
+        </div>
         {/* Controles 3D estilo Strava: 2D/3D, girar, inclinar. */}
         <div className="absolute right-2 top-2 z-10 flex flex-col gap-1.5">
           <button type="button" onClick={toggle3d} aria-label="Cambiar vista 2D o 3D"

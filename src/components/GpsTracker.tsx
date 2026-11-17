@@ -269,6 +269,7 @@ export default function GpsTracker({ onSave, onCancel, onProgress, guide, onClea
         markers={routeMarkers}
         height={260}
         follow
+        defaultBasemap={guide?.zone === 'Isla Mujeres' ? 'satellite' : 'dark'}
         offlineNote="📶 Sin internet: el mapa no carga las calles, pero tu ruta se sigue grabando con GPS."
       />
     </Suspense>

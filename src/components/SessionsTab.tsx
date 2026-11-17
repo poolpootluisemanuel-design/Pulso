@@ -9,8 +9,7 @@ import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
 const MapView = lazy(() => import('./MapView'))
 import type { MapMarker } from './MapView'
 import RecommendedRoutes from './RecommendedRoutes'
-import { RECOMMENDED_ROUTES } from '../lib/routes'
-import { CANCUN_CENTER } from '../lib/routes'
+import { RECOMMENDED_ROUTES, routesSortedByZone, zoneCenter } from '../lib/routes'
 import type { RecommendedRoute } from '../lib/routes'
 
 const SPORT_EMOJI: Record<string, string> = {
@@ -44,6 +43,28 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
   // Dentro del mapa: sesiones con ubicación o rutas recomendadas.
   const [mapMode, setMapMode] = useState<'sesiones' | 'rutas'>('sesiones')
   const [selectedRoute, setSelectedRoute] = useState<RecommendedRoute | null>(null)
+  // Centro del mapa: GPS del usuario si ya dio permiso, si no su zona
+  // (Isla Mujeres si es su zona), nunca siempre Cancún centro.
+  const [gpsCenter, setGpsCenter] = useState<{ lat: number; lng: number } | null>(null)
+
+  // Al abrir el mapa, intenta centrar en el GPS si el permiso ya está
+  // concedido (sin preguntar de nuevo); si no, centra en su zona.
+  function openMap() {
+    setView('mapa')
+    if (!('geolocation' in navigator)) return
+    const nav = navigator as Navigator & { permissions?: { query: (o: { name: string }) => Promise<{ state: string }> } }
+    nav.permissions?.query({ name: 'geolocation' }).then(
+      (res) => {
+        if (res.state !== 'granted') return
+        navigator.geolocation.getCurrentPosition(
+          (pos) => setGpsCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => undefined,
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        )
+      },
+      () => undefined
+    ).catch(() => undefined)
+  }
   const [lat, setLat] = useState<number | null>(null)
   const [lng, setLng] = useState<number | null>(null)
   const [locBusy, setLocBusy] = useState(false)
@@ -112,7 +133,13 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
   })
   const mapCenter = withCoords.length > 0
     ? { lat: withCoords[0].lat as number, lng: withCoords[0].lng as number }
-    : CANCUN_CENTER
+    : gpsCenter || zoneCenter(profile.zone)
+  // En Isla Mujeres el mapa oscuro es casi todo mar gris: allí el
+  // mapa arranca en satélite (se ve la isla real). El usuario puede
+  // cambiarlo con el selector y su elección se guarda.
+  const defaultBasemap = profile.zone === 'Isla Mujeres' ? 'satellite' as const : 'dark' as const
+  // Primera ruta que se muestra al abrir Rutas: la primera de su zona.
+  const firstRouteForZone = routesSortedByZone(profile.zone)[0] || RECOMMENDED_ROUTES[0]
 
   return (
     <div className="space-y-4">
@@ -176,7 +203,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
       {/* Vista Lista / Mapa */}
       <div className="flex gap-2">
         <button onClick={() => setView('lista')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
-        <button onClick={() => setView('mapa')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
+        <button onClick={openMap} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
       </div>
 
       {view === 'mapa' && (
@@ -184,7 +211,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
           {/* Dentro del mapa: sesiones o rutas recomendadas para correr. */}
           <div className="flex gap-2">
             <button onClick={() => setMapMode('sesiones')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'sesiones' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📍 Sesiones ({withCoords.length})</button>
-            <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(RECOMMENDED_ROUTES[0]) }} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
+            <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(firstRouteForZone) }} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
           </div>
 
           {mapMode === 'sesiones' && (withCoords.length === 0 ? (
@@ -192,7 +219,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
           ) : (
             <>
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                <MapView center={mapCenter} markers={markers} height={320} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                <MapView center={mapCenter} markers={markers} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
               </Suspense>
               <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
             </>
@@ -205,6 +232,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                   <MapView
                     center={selectedRoute.points[0]}
                     guidePoints={selectedRoute.points}
+                    defaultBasemap={defaultBasemap}
                     markers={[
                       { key: 'r-inicio', lat: selectedRoute.points[0].lat, lng: selectedRoute.points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
                       { key: 'r-fin', lat: selectedRoute.points[selectedRoute.points.length - 1].lat, lng: selectedRoute.points[selectedRoute.points.length - 1].lng, emoji: '🏁', color: '#E63946', popupHtml: '<b>Fin</b>' },
@@ -218,6 +246,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                 selectedId={selectedRoute?.id || null}
                 onSelect={setSelectedRoute}
                 onRun={(r) => onRunRoute?.(r)}
+                userZone={profile.zone}
               />
             </>
           )}
