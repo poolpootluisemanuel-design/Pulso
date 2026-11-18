@@ -300,9 +300,16 @@ Todo en una sola operación, cableado en la app (`npm run build` en verde):
    explícito en Entrenar → Grabar con GPS ("📍 Que se me vea
    entrenando ahora", apagado por defecto); se publica solo
    mientras graba y se quita al terminar/pausar (o a los 60 s sin
-   actualizar). Caveat: al entrar/salir un entrenador, `MapView`
-   puede recentrar el mapa (su `fitBounds` depende de los
-   marcadores).
+   actualizar). **Privacidad (auditoría 2026-11-18):** la posición
+   se publica redondeada a 3 decimales (~100 m), no exacta, porque
+   los canales Realtime son abiertos para quien tenga la anon key
+   (que va dentro del APK). Para ubicación precisa solo para
+   usuarios autenticados, hay que activar **Realtime
+   Authorization** en Supabase (Database → Replication → canal
+   `live-training` → RLS) y comprobarlo en el panel; la app no
+   puede verificarlo desde el código. Caveat: al entrar/salir un
+   entrenador, `MapView` puede recentrar el mapa (su `fitBounds`
+   depende de los marcadores).
 4. **Retos con premios** (`src/lib/challengePrizes.ts`,
    `src/components/ChallengePrize.tsx`): un reto puede tener
    `prize_text` + `business_id` (migración
@@ -327,3 +334,53 @@ en cualquier orden):** `migration_session_messages.sql`,
 `migration_push_tokens.sql`, `migration_challenge_prizes.sql`,
 `migration_coach_mode.sql`. Sin correrlas, cada función cae a su
 modo local o no muestra su dato nuevo, sin romper la app.
+
+## Arreglos de seguridad y robustez (auditoría 2026-11-18)
+
+Aplicados en el código; las migraciones SQL están listas en
+`supabase/` pero **NO se ejecutaron en Supabase** (eso se hace
+aparte, en el SQL Editor, en el orden de abajo):
+
+1. `migration_admin_flags.sql`: los permisos viven en la tabla
+   `admin_flags` (solo la toca un admin) y un trigger impide que
+   un usuario normal cambie `is_admin`/`is_blocked` en profiles.
+   La app lee el rol desde la vista `profiles_public`.
+2. `migration_profiles_public.sql`: vista pública SIN correo; la
+   app ya no hace `select('*')` sobre profiles.
+3. `migration_chat_moderation.sql`: escribir en el chat exige ser
+   participante confirmado o anfitrión (en el servidor), el nombre
+   del autor lo fija un trigger desde el perfil, y el autor o un
+   admin pueden borrar mensajes (botón Borrar en el chat).
+4. `migration_challenges_businesses_admin.sql`: retos y negocios
+   solo los crea/edita/borra un admin.
+5. `migration_join_session_rpc.sql`: función `join_session` que
+   reserva el lugar en una transacción (sin pasarse del cupo);
+   la app la usa con fallback al conteo anterior si la migración
+   no está corrida.
+6. `migration_limits.sql`: CHECKs de tamaño (post ≤1000, título
+   ≤80, lugar ≤100, cupo 2–50). La fecha no pasada solo se valida
+   en la app.
+7. Modo local: sesión por token aleatorio de 128 bits (ya no por
+   id), hash viejo `local-…` ya no se acepta, y la recuperación
+   sin correo exige haberla pedido en el mismo teléfono.
+8. Outbox: tras 3 fallos que no son de red, la operación sale de
+   la cola y aparece en Perfil → "No se pudieron subir", con su
+   motivo y botón Descartar. Lo mismo para los mensajes del chat.
+9. Mapa en vivo: posición redondeada a ~100 m (ver punto 3 de
+   arriba); falta activar Realtime Authorization en Supabase.
+10. Errores visibles: si la carga falla con internet y no es un
+    error de red, sale un aviso con botón Reintentar; el botón
+    Cancelar de una sesión pide confirmación y avisa si falla.
+11. `android/app/google-services.json` ya está en `.gitignore`
+    (antes solo se había borrado a mano del repo).
+12. `android:allowBackup="false"` en el manifiesto: el respaldo
+    de Android ya no sube los datos locales a Google Drive.
+
+**OJO al correr las migraciones:** el `schema.sql` completo
+nunca se corrió entero en la base real, así que las políticas
+vivas pueden diferir del archivo. Corre primero
+`migration_admin_flags.sql` y luego las demás, y verifica en
+Authentication → Policies que no queden dos políticas
+contradictorias sobre la misma tabla. Si `profiles_public` no
+existe aún, la app cae al espejo local para perfiles (los
+nombres pueden verse vacíos hasta correrla).

@@ -25,6 +25,10 @@ android/*.iml
 android/.idea
 *.keystore
 *.jks
+# Firebase: el archivo con la llave NUNCA se sube al repo (ya se
+# filtró una vez, 2026-11-17, y hubo que rotar la llave). En CI se
+# restaura desde el secreto GOOGLE_SERVICES_JSON del repo.
+android/app/google-services.json
 
 # Editor directories and files
 .vscode/*

@@ -8,14 +8,17 @@
 // Nunca se inventan credenciales aquí.
 import { supabase, supabaseConfigured } from './supabase'
 import type { AuthUser, Business, Challenge, Level, PlanTask, Post, Profile, Rsvp, SessionItem, SportLevel, TrainingPlan, Workout } from './types'
-import { addDaysISO, legacyLocalHash, sha256, uid } from './utils'
+import { addDaysISO, randomToken, sha256, todayISO, uid } from './utils'
 
 export const mode = supabaseConfigured ? 'supabase' : 'local'
 
 // ---------- Administración ----------
 // El dueño de la app es admin: por su correo (aunque is_admin sea
-// false en la base) o por la columna is_admin del perfil. El correo
-// del dueño NUNCA se muestra en la app: solo se compara aquí.
+// false en la base) o por la tabla admin_flags (ver
+// supabase/migration_admin_flags.sql). El correo del dueño NUNCA
+// se muestra en la app: solo se compara aquí. El campo
+// profile.is_admin lo llena getProfile/listProfiles desde la vista
+// profiles_public, que ya trae is_admin/is_blocked de admin_flags.
 export const OWNER_EMAIL = 'pool.poot.luis.emanuel@gmail.com'
 export function isAdminUser(user: AuthUser | null, profile: Profile | null): boolean {
   if (!user) return false
@@ -30,6 +33,10 @@ interface LocalUser {
   email: string
   name: string
   passwordHash: string
+  /** Token de sesión aleatorio (128 bits). En modo local la sesión
+   *  se comprueba por este token, NO por el id: saber el id de un
+   *  usuario ya no basta para entrar como él. */
+  sessionToken?: string
 }
 
 function load<T>(key: string, fallback: T): T {
@@ -60,7 +67,7 @@ function withTimeout<T>(p: PromiseLike<T>, ms = 5000): Promise<T> {
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ])
 }
-function isNetworkError(e: unknown): boolean {
+export function isNetworkError(e: unknown): boolean {
   const m = (e instanceof Error ? e.message : String(e)).toLowerCase()
   return (
     m.includes('timeout') || m.includes('failed to fetch') || m.includes('networkerror') ||
@@ -77,7 +84,43 @@ function cacheGet<T>(key: string, fallback: T): T {
   } catch { return fallback }
 }
 
-export interface OutboxOp { kind: 'workout' | 'session' | 'post' | 'rsvp' | 'profile' | 'plan' | 'delete-workout'; item?: unknown; id?: string }
+export interface OutboxOp {
+  kind: 'workout' | 'session' | 'post' | 'rsvp' | 'profile' | 'plan' | 'delete-workout'
+  item?: unknown
+  id?: string
+  /** Intentos fallidos que NO fueron de red (ej. la base rechazó la
+   *  operación). A los 3, la operación sale de la cola y pasa a la
+   *  lista de fallidos visible en Perfil (ver addFailedOp). */
+  attempts?: number
+  /** Motivo del último fallo no-de-red. */
+  error?: string
+}
+export interface FailedOp {
+  kind: OutboxOp['kind'] | 'chat-message'
+  id?: string
+  error: string
+  failedAt: string // ISO
+}
+function loadFailedOps(): FailedOp[] {
+  try { return JSON.parse(localStorage.getItem(LS + 'failed') || '[]') as FailedOp[] } catch { return [] }
+}
+function saveFailedOps(ops: FailedOp[]): void {
+  try { localStorage.setItem(LS + 'failed', JSON.stringify(ops)) } catch { /* noop */ }
+}
+/** Operaciones que fallaron 3 veces por un motivo que no es la red:
+ *  se muestran en Perfil para que el usuario las vea y las descarte. */
+export function listFailedOps(): FailedOp[] { return loadFailedOps() }
+export function addFailedOp(op: FailedOp): void {
+  const list = loadFailedOps()
+  const key = op.id || `${op.kind}-${op.failedAt}`
+  if (!list.some((o) => (o.id || `${o.kind}-${o.failedAt}`) === key)) {
+    list.push(op)
+    saveFailedOps(list)
+  }
+}
+export function clearFailedOp(id: string | undefined, failedAt: string): void {
+  saveFailedOps(loadFailedOps().filter((o) => !((o.id === id) && o.failedAt === failedAt)))
+}
 function loadOutbox(): OutboxOp[] {
   try { return JSON.parse(localStorage.getItem(LS + 'outbox') || '[]') as OutboxOp[] } catch { return [] }
 }
@@ -136,8 +179,10 @@ export async function syncOutbox(): Promise<number> {
         const { error } = await supabase.from('profiles').upsert({
           id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
           beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
-          ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
-          ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
+          // is_admin / is_blocked NO se suben aquí: viven en la tabla
+          // admin_flags (migration_admin_flags.sql) y solo el admin
+          // los cambia con setUserBlocked. Un guardado normal nunca
+          // debe tocarlos.
           ...(p.is_coach !== undefined ? { is_coach: p.is_coach } : {}),
           ...(p.coach_specialty !== undefined ? { coach_specialty: p.coach_specialty } : {}),
           ...(p.coach_experience !== undefined ? { coach_experience: p.coach_experience } : {}),
@@ -154,9 +199,28 @@ export async function syncOutbox(): Promise<number> {
       } else if (op.kind === 'delete-workout' && op.id) {
         await supabase.from('workouts').delete().eq('id', op.id)
       }
-    } catch {
-      // Sigue sin red o error real: se queda en la cola para el próximo intento.
-      remaining.push(op)
+    } catch (e) {
+      // Error de red: se queda en la cola para el próximo intento.
+      // Error real (la base rechazó la operación): se cuenta el
+      // intento; a los 3 fallos se saca de la cola y pasa a la lista
+      // de fallidos de Perfil, para no reintentarla para siempre en
+      // silencio ni hacer creer que se subió.
+      if (isNetworkError(e)) {
+        remaining.push(op)
+      } else {
+        const attempts = (op.attempts || 0) + 1
+        const msg = e instanceof Error ? e.message : String(e)
+        if (attempts >= 3) {
+          addFailedOp({
+            kind: op.kind,
+            id: (op.item as { id?: string } | undefined)?.id || op.id,
+            error: msg,
+            failedAt: new Date().toISOString(),
+          })
+        } else {
+          remaining.push({ ...op, attempts, error: msg })
+        }
+      }
     }
   }
   saveOutbox(remaining)
@@ -201,22 +265,42 @@ function seedLocal(): void {
 if (!supabaseConfigured) seedLocal()
 
 // ---------- Auth ----------
-// La sesión se guarda en localStorage Y en una cookie (mismo id): si el
-// navegador pierde una de las dos al cerrar la pestaña, la otra rescata
-// la sesión. La cookie no lleva la contraseña, solo el id de sesión.
-function setSession(id: string): void {
-  localStorage.setItem(LS + 'session', id)
-  try { document.cookie = `${LS}session=${id}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax` } catch { /* noop */ }
+// La sesión se guarda en localStorage Y en una cookie (el mismo
+// token): si el navegador pierde una de las dos al cerrar la
+// pestaña, la otra rescata la sesión. La cookie no lleva la
+// contraseña, solo el token de sesión.
+// En modo local el token es aleatorio (128 bits, randomToken): la
+// sesión se comprueba por token, NO por el id del usuario. Antes
+// bastaba saber el id para entrar como otro usuario.
+// En modo Supabase manda Supabase Auth; este token local solo se
+// usa cuando no hay Supabase.
+function setSession(token: string): void {
+  localStorage.setItem(LS + 'session', token)
+  try { document.cookie = `${LS}session=${token}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax` } catch { /* noop */ }
 }
 function clearSession(): void {
   localStorage.removeItem(LS + 'session')
   try { document.cookie = `${LS}session=; path=/; max-age=0; SameSite=Lax` } catch { /* noop */ }
 }
-function getSessionId(): string | null {
+function getSessionToken(): string | null {
   const ls = localStorage.getItem(LS + 'session')
   if (ls) return ls
   const m = document.cookie.match(new RegExp('(?:^|; )' + LS + 'session=([^;]*)'))
   return m ? decodeURIComponent(m[1]) : null
+}
+/** Busca al usuario local por su token de sesión. Si la sesión
+ *  guardada todavía es un id viejo (de antes del token), se migra:
+ *  se le genera un token a ese usuario y se guarda. */
+function localUserByToken(token: string): LocalUser | null {
+  const users = load<LocalUser[]>('users', [])
+  const byToken = users.find((x) => x.sessionToken === token)
+  if (byToken) return byToken
+  const byId = users.find((x) => x.id === token)
+  if (!byId) return null
+  byId.sessionToken = randomToken()
+  save('users', users)
+  setSession(byId.sessionToken)
+  return byId
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
@@ -234,7 +318,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     const cached = cacheGet<Profile | null>('profile_' + sessionUser.id, null)
     try {
       const { data: prof } = await withTimeout(
-        supabase.from('profiles').select('name').eq('id', sessionUser.id).maybeSingle()
+        supabase.from('profiles_public').select('name').eq('id', sessionUser.id).maybeSingle()
       )
       if (!prof) {
         await ensureSupabaseProfile(sessionUser.id, sessionUser.email || '', (sessionUser.user_metadata?.name as string) || '')
@@ -248,10 +332,9 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       return { id: sessionUser.id, email: sessionUser.email || '', name: cached?.name || (sessionUser.user_metadata?.name as string) || 'Sin nombre' }
     }
   }
-  const id = getSessionId()
-  if (!id) return null
-  const users = load<LocalUser[]>('users', [])
-  const u = users.find((x) => x.id === id)
+  const token = getSessionToken()
+  if (!token) return null
+  const u = localUserByToken(token)
   return u ? { id: u.id, email: u.email, name: u.name } : null
 }
 
@@ -319,13 +402,14 @@ export async function signUp(name: string, email: string, password: string): Pro
   const users = load<LocalUser[]>('users', [])
   if (users.some((u) => u.email === cleanEmail)) throw new Error('Ese correo ya tiene cuenta. Entra con tu contraseña o usa recuperación.')
   const id = uid()
-  users.push({ id, email: cleanEmail, name: name.trim(), passwordHash: await sha256(password) })
+  const token = randomToken()
+  users.push({ id, email: cleanEmail, name: name.trim(), passwordHash: await sha256(password), sessionToken: token })
   save('users', users)
   const profile: Profile = { id, name: name.trim(), email: cleanEmail, zone: 'Cancún centro', bio: '', beginner: true, sports: [], availability: [] }
   const profiles = load<Profile[]>('profiles', [])
   profiles.push(profile)
   save('profiles', profiles)
-  setSession(id)
+  setSession(token)
   return { id, email: cleanEmail, name: name.trim() }
 }
 
@@ -335,7 +419,7 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
     const { data, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password })
     if (error) throw new Error('Correo o contraseña incorrectos.')
     if (!data.user) throw new Error('No se pudo entrar.')
-    const { data: prof } = await supabase.from('profiles').select('name').eq('id', data.user.id).maybeSingle()
+    const { data: prof } = await supabase.from('profiles_public').select('name').eq('id', data.user.id).maybeSingle()
     if (!prof) {
       // Cuenta de Auth existe pero sin fila en profiles: se crea sola.
       await ensureSupabaseProfile(data.user.id, cleanEmail, (data.user.user_metadata?.name as string) || '')
@@ -345,17 +429,18 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
   }
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.email === cleanEmail)
-  // Acepta el hash SHA-256 actual y, para cuentas creadas antes del
-  // arreglo, el hash viejo 'local-…': si entra con el viejo, se le
-  // actualiza el hash al nuevo para que no vuelva a fallar.
+  // Solo se acepta el hash SHA-256 actual. El hash viejo 'local-…'
+  // (32 bits, trivial) ya NO se acepta: las cuentas creadas antes
+  // del arreglo deben usar "Recupera tu cuenta" para poner una
+  // contraseña nueva con el hash actual.
   const newHash = await sha256(password)
-  const ok = !!u && (u.passwordHash === newHash || u.passwordHash === legacyLocalHash(password))
+  const ok = !!u && u.passwordHash === newHash
   if (!ok || !u) throw new Error('Correo o contraseña incorrectos.')
-  if (u.passwordHash !== newHash) {
-    u.passwordHash = newHash
+  if (!u.sessionToken) {
+    u.sessionToken = randomToken()
     save('users', users)
   }
-  setSession(u.id)
+  setSession(u.sessionToken)
   return { id: u.id, email: u.email, name: u.name }
 }
 
@@ -373,8 +458,12 @@ export async function resetPassword(email: string): Promise<void> {
     if (error) throw new Error(error.message)
     return
   }
-  // Modo local: no hay correo que enviar. Se permite poner contraseña nueva
-  // directamente (esto solo existe en modo local, nunca en Supabase).
+  // Modo local (SOLO DEMO, sin correo que enviar): se permite
+  // poner contraseña nueva directamente, pero SOLO si en este
+  // mismo teléfono se pidió la recuperación antes (queda marcado
+  // en localStorage) y la contraseña nueva es de al menos 6
+  // caracteres. Esto no existe en modo Supabase: ahí la
+  // contraseña nueva llega por el link del correo.
   const users = load<LocalUser[]>('users', [])
   if (!users.some((u) => u.email === cleanEmail)) throw new Error('Ese correo no tiene cuenta en este teléfono.')
   localStorage.setItem(LS + 'reset-email', cleanEmail)
@@ -383,12 +472,19 @@ export async function resetPassword(email: string): Promise<void> {
 export async function setNewPasswordLocal(email: string, password: string): Promise<void> {
   if (supabaseConfigured) throw new Error('En modo Supabase la contraseña nueva llega por el link de tu correo.')
   if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres.')
+  // Solo-demo: exige haber pedido la recuperación en este teléfono
+  // (resetPassword marca el correo en localStorage). Sin esa marca,
+  // cualquiera que supiera el correo podría cambiar la contraseña.
+  const marked = localStorage.getItem(LS + 'reset-email')
+  if (marked !== email.trim().toLowerCase()) throw new Error('Primero pide la recuperación de tu cuenta.')
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.email === email.trim().toLowerCase())
   if (!u) throw new Error('Ese correo no tiene cuenta.')
   u.passwordHash = await sha256(password)
+  // La contraseña nueva invalida la sesión vieja: token nuevo.
+  u.sessionToken = randomToken()
   save('users', users)
-  setSession(u.id)
+  setSession(u.sessionToken)
   localStorage.removeItem(LS + 'reset-email')
 }
 
@@ -407,9 +503,12 @@ export async function changePassword(current: string, next: string): Promise<voi
   const users = load<LocalUser[]>('users', [])
   const u = users.find((x) => x.id === me.id)
   const currentHash = await sha256(current)
-  if (!u || (u.passwordHash !== currentHash && u.passwordHash !== legacyLocalHash(current))) throw new Error('Tu contraseña actual no coincide.')
+  if (!u || u.passwordHash !== currentHash) throw new Error('Tu contraseña actual no coincide.')
   u.passwordHash = await sha256(next)
+  // La contraseña nueva invalida la sesión vieja: token nuevo.
+  u.sessionToken = randomToken()
   save('users', users)
+  setSession(u.sessionToken)
 }
 
 export async function signOut(): Promise<void> {
@@ -418,11 +517,17 @@ export async function signOut(): Promise<void> {
 }
 
 // ---------- Perfiles ----------
+// Lectura de perfiles: se usa la vista `profiles_public` (ver
+// supabase/migration_profiles_public.sql), que trae todos los datos
+// para encontrar compañero pero SIN el correo. La tabla profiles
+// ya no se lee con select('*'): su select quedó limitado a la
+// propia fila y la app no necesita el correo de otros (el correo
+// del usuario que entra viene de su sesión de Auth).
 export async function getProfile(id: string): Promise<Profile | null> {
   if (supabaseConfigured && supabase) {
     try {
       const { data, error } = await withTimeout(
-        supabase.from('profiles').select('*').eq('id', id).maybeSingle()
+        supabase.from('profiles_public').select('*').eq('id', id).maybeSingle()
       )
       if (error || !data) return cacheGet<Profile | null>('profile_' + id, null)
       const prof = rowToProfile(data)
@@ -441,12 +546,11 @@ export async function saveProfile(p: Profile): Promise<void> {
       const { error } = await withTimeout(supabase.from('profiles').upsert({
         id: p.id, name: p.name, email: p.email, zone: p.zone, bio: p.bio,
         beginner: p.beginner, sports: p.sports, availability: p.availability, photo_url: p.photo_url || null,
-        // Solo se escribe is_admin si viene definido: si no, un perfil
-        // guardado normal borraría el permiso de admin en la base.
-        ...(p.is_admin !== undefined ? { is_admin: p.is_admin } : {}),
-        // Igual con is_blocked: un guardado normal no debe desbloquear
-        // a nadie por accidente.
-        ...(p.is_blocked !== undefined ? { is_blocked: p.is_blocked } : {}),
+        // is_admin / is_blocked NO se escriben aquí: viven en la
+        // tabla admin_flags (migration_admin_flags.sql) y solo el
+        // admin los cambia con setUserBlocked. Un guardado normal
+        // nunca debe tocarlos (antes, si venían definidos en el
+        // objeto, se subían y podían borrar el permiso de admin).
         // Igual con el modo coach: solo se escribe si viene definido.
         ...(p.is_coach !== undefined ? { is_coach: p.is_coach } : {}),
         ...(p.coach_specialty !== undefined ? { coach_specialty: p.coach_specialty } : {}),
@@ -478,7 +582,8 @@ export async function saveProfile(p: Profile): Promise<void> {
 export async function listProfiles(): Promise<Profile[]> {
   if (supabaseConfigured && supabase) {
     try {
-      const { data, error } = await withTimeout(supabase.from('profiles').select('*').order('name'))
+      // Vista pública sin correo (migration_profiles_public.sql).
+      const { data, error } = await withTimeout(supabase.from('profiles_public').select('*').order('name'))
       if (error) throw new Error(error.message)
       const list = (data || []).map(rowToProfile)
       cacheSet('profiles', list)
@@ -523,14 +628,26 @@ function assertAdmin(adminUser: AuthUser | null, adminProfile: Profile | null): 
   if (!isAdminUser(adminUser, adminProfile)) throw new Error('Solo el administrador puede hacer esto.')
 }
 
-/** Bloquea o desbloquea a un usuario (solo admin). */
+/** Bloquea o desbloquea a un usuario (solo admin). El bloqueo vive
+ *  en la tabla admin_flags (migration_admin_flags.sql): solo un
+ *  admin puede escribir ahí. También se actualiza la columna
+ *  espejo is_blocked en profiles (el trigger la protege: solo un
+ *  admin puede cambiarla). */
 export async function setUserBlocked(adminUser: AuthUser, adminProfile: Profile, target: Profile, blocked: boolean): Promise<void> {
   assertAdmin(adminUser, adminProfile)
   if (target.id === adminUser.id) throw new Error('No puedes bloquearte a ti mismo.')
   if (target.is_admin) throw new Error('No puedes bloquear a otro administrador.')
   if (supabaseConfigured && supabase) {
+    // 1) Tabla de permisos (la que manda).
+    const { error: fErr } = await withTimeout(supabase.from('admin_flags').upsert({
+      profile_id: target.id, is_blocked: blocked,
+    }, { onConflict: 'profile_id' }))
+    if (fErr) throw new Error(fErr.message)
+    // 2) Espejo en profiles (si la migración vieja aún no corrió,
+    //    este update puede fallar por columna: se ignora, porque
+    //    admin_flags ya guardó el bloqueo).
     const { error } = await withTimeout(supabase.from('profiles').update({ is_blocked: blocked }).eq('id', target.id))
-    if (error) throw new Error(error.message)
+    if (error) console.warn('Bloqueo guardado en admin_flags; el espejo en profiles no se actualizó:', error.message)
     cacheSet('profile_' + target.id, { ...target, is_blocked: blocked })
     return
   }
@@ -590,7 +707,19 @@ export async function listSessions(): Promise<SessionItem[]> {
 
 export async function createSession(s: Omit<SessionItem, 'id'>): Promise<SessionItem> {
   await assertNotBlocked(s.host_id)
-  const item: SessionItem = { ...s, id: uid() }
+  // Límites (auditoría ítem 7 🟡): se validan aquí, no solo en el
+  // formulario, porque por API el formulario se salta. La base
+  // también los exige (migration_limits.sql).
+  const title = s.title.trim()
+  const place = s.place.trim()
+  if (!title) throw new Error('La sesión necesita un título.')
+  if (title.length > 80) throw new Error('El título no puede pasar de 80 caracteres.')
+  if (!place) throw new Error('La sesión necesita un lugar.')
+  if (place.length > 100) throw new Error('El lugar no puede pasar de 100 caracteres.')
+  const capacity = Number(s.capacity)
+  if (!Number.isFinite(capacity) || capacity < 2 || capacity > 50) throw new Error('El cupo debe ser entre 2 y 50 personas.')
+  if (s.date < todayISO()) throw new Error('La fecha de la sesión no puede ser pasada.')
+  const item: SessionItem = { ...s, title, place, capacity, id: uid() }
   if (supabaseConfigured && supabase) {
     try {
       const { error } = await withTimeout(supabase.from('sessions').insert(item))
@@ -638,6 +767,32 @@ export async function listRsvps(sessionId: string): Promise<Rsvp[]> {
 
 export async function joinSession(session: SessionItem, profileId: string): Promise<'confirmed' | 'waitlist'> {
   await assertNotBlocked(profileId)
+  if (supabaseConfigured && supabase) {
+    // RPC join_session (migration_join_session_rpc.sql): cuenta y
+    // reserva en UNA transacción con la sesión bloqueada, así dos
+    // personas no se quedan con el último lugar a la vez. Si la
+    // migración aún no se corrió en Supabase, la RPC no existe y se
+    // cae al conteo anterior (con su riesgo conocido).
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc('join_session', { p_session_id: session.id, p_profile_id: profileId })
+      )
+      if (error) throw error
+      if (data === 'confirmed' || data === 'waitlist') return data
+      throw new Error('La base no devolvió el estado de tu lugar.')
+    } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
+      if (msg.includes('already') || msg.includes('ya estás')) throw new Error('Ya estás apuntado en esta sesión.')
+      if (!/function|does not exist|pgrst|not found|schema cache/i.test(msg) && !isNetworkError(e)) throw e instanceof Error ? e : new Error(msg)
+      if (isNetworkError(e)) {
+        // Sin internet: se apunta en el teléfono y se sube luego.
+        const rsvp: Rsvp = { id: uid(), session_id: session.id, profile_id: profileId, status: 'waitlist' }
+        queueOffline({ kind: 'rsvp', item: rsvp })
+        return 'waitlist'
+      }
+      console.warn('RPC join_session no disponible (falta correr migration_join_session_rpc.sql); usando conteo local:', msg)
+    }
+  }
   const rsvps = await listRsvps(session.id)
   if (rsvps.some((r) => r.profile_id === profileId)) throw new Error('Ya estás apuntado en esta sesión.')
   const confirmed = rsvps.filter((r) => r.status === 'confirmed').length
@@ -662,7 +817,8 @@ export async function joinSession(session: SessionItem, profileId: string): Prom
 
 export async function cancelRsvp(sessionId: string, profileId: string): Promise<void> {
   if (supabaseConfigured && supabase) {
-    await supabase.from('rsvps').delete().eq('session_id', sessionId).eq('profile_id', profileId)
+    const { error } = await withTimeout(supabase.from('rsvps').delete().eq('session_id', sessionId).eq('profile_id', profileId))
+    if (error) throw new Error(error.message)
     // Promover al primero en lista de espera.
     const { data } = await supabase.from('rsvps').select('*').eq('session_id', sessionId).eq('status', 'waitlist').order('created_at').limit(1)
     if (data && data[0]) await supabase.from('rsvps').update({ status: 'confirmed' }).eq('id', data[0].id)
@@ -818,8 +974,12 @@ export async function listPosts(): Promise<Post[]> {
 
 export async function createPost(profileId: string, authorName: string, text: string): Promise<Post> {
   await assertNotBlocked(profileId)
-  const post: Post = { id: uid(), profile_id: profileId, author_name: authorName, text: text.trim(), created_at: new Date().toISOString() }
-  if (!post.text) throw new Error('Escribe algo para publicar.')
+  const clean = text.trim()
+  if (!clean) throw new Error('Escribe algo para publicar.')
+  // Límite (auditoría ítem 7 🟡): también lo exige la base
+  // (migration_limits.sql); el chat ya tenía su límite de 500.
+  if (clean.length > 1000) throw new Error('La publicación no puede pasar de 1000 caracteres.')
+  const post: Post = { id: uid(), profile_id: profileId, author_name: authorName, text: clean, created_at: new Date().toISOString() }
   if (supabaseConfigured && supabase) {
     try {
       const { error } = await withTimeout(supabase.from('posts').insert(post))

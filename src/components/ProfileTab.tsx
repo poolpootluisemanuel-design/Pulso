@@ -1,10 +1,21 @@
 import { useState } from 'react'
 import type { AuthUser, Profile } from '../lib/types'
 import { DAYS, LEVELS, SPORTS, ZONES } from '../lib/types'
-import { changePassword, saveProfile, signOut } from '../lib/store'
+import { changePassword, clearFailedOp, listFailedOps, saveProfile, signOut, type FailedOp } from '../lib/store'
 import { detectZone } from '../lib/utils'
 import { isNative } from '../lib/native'
 import { Btn, Card, Field, inputCls, selectCls } from './ui'
+
+const FAILED_KIND_LABEL: Record<string, string> = {
+  workout: 'Entrenamiento',
+  session: 'Sesión',
+  post: 'Publicación',
+  rsvp: 'Apuntarse a sesión',
+  profile: 'Perfil',
+  plan: 'Plan de entrenamiento',
+  'delete-workout': 'Borrar entrenamiento',
+  'chat-message': 'Mensaje del chat',
+}
 
 export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShowTutorial, onShowPermissions }: { user: AuthUser; profile: Profile; onRefresh: () => void; onSignOut: () => void; onShowTutorial?: () => void; onShowPermissions?: () => void }) {
   const [name, setName] = useState(profile.name)
@@ -49,6 +60,10 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
   }
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
+  // Cosas que no se pudieron subir a la nube (fallaron 3 veces por
+  // un motivo que no es la red): se muestran aquí con el motivo,
+  // para no hacer creer que se guardaron. Se pueden descartar.
+  const [failedOps, setFailedOps] = useState<FailedOp[]>(() => listFailedOps())
 
   function toggleSport(sport: string) {
     setSports((prev) =>
@@ -176,6 +191,32 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
           El tutorial y los permisos solo salen solos la primera vez; desde aquí los puedes volver a abrir cuando quieras.
         </p>
       </Card>
+
+      {failedOps.length > 0 && (
+        <Card>
+          <p className="mb-1 font-black text-night">⚠️ No se pudieron subir ({failedOps.length})</p>
+          <p className="mb-2 text-xs text-slate-500">
+            Estas cosas fallaron 3 veces al subir a la nube por un motivo que no es tu internet. No se perdieron del teléfono, pero no están en tu cuenta. Revisa el motivo y descarta las que ya no importen.
+          </p>
+          <ul className="space-y-2">
+            {failedOps.map((f) => (
+              <li key={`${f.kind}-${f.failedAt}`} className="rounded-xl bg-red-50 p-2">
+                <p className="text-sm font-bold text-red-800">{FAILED_KIND_LABEL[f.kind] || f.kind}</p>
+                <p className="break-words text-xs text-red-700">{f.error}</p>
+                <button
+                  className="mt-1 text-xs font-bold text-red-600 underline"
+                  onClick={() => {
+                    clearFailedOp(f.id, f.failedAt)
+                    setFailedOps(listFailedOps())
+                  }}
+                >
+                  Descartar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Btn variant="ghost" className="w-full" onClick={async () => { await signOut(); onSignOut() }}>Cerrar sesión</Btn>
     </div>

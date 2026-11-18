@@ -103,7 +103,7 @@ export default function AdminPanel({
       <p className="text-sm text-slate-500">Solo tú ves este panel. Aquí ves cómo va PULSO y puedes moderar sesiones y publicaciones, bloquear usuarios y editar sus perfiles.</p>
       {mode === 'supabase' && !dbAdmin && (
         <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-          ⚠️ Entras al panel por ser el dueño, pero en la base aún no tienes el permiso de admin: para ver los entrenamientos de todos, borrar sesiones o publicaciones de otros y bloquear o editar usuarios, corre el esquema actualizado (supabase/schema.sql) en el SQL Editor de Supabase. Sin eso, esas acciones pueden fallar.
+          ⚠️ Entras al panel por ser el dueño, pero en la base aún no tienes el permiso de admin: para ver los entrenamientos de todos, borrar sesiones o publicaciones de otros y bloquear o editar usuarios, corre en el SQL Editor de Supabase la migración supabase/migration_admin_flags.sql (y las demás migraciones nuevas). Sin eso, esas acciones pueden fallar.
         </p>
       )}
       {err && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{err}</p>}

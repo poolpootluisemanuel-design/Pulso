@@ -108,6 +108,21 @@ export function computeMedals(workouts: Workout[]): Medal[] {
   ]
 }
 
+/** Token aleatorio de 128 bits (32 caracteres hex) para la sesión
+ *  en modo local. Usa crypto.getRandomValues cuando existe; si no,
+ *  combina Math.random con la hora (peor, pero el modo local es
+ *  solo demo). Nunca se usa el id del usuario como sesión. */
+export function randomToken(): string {
+  try {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) +
+      Date.now().toString(36) + Math.random().toString(36).slice(2)
+  }
+}
+
 /** SHA-256 puro en JavaScript, determinista en cualquier contexto.
  *  ANTES se usaba crypto.subtle, que SOLO existe en contextos seguros
  *  (https). Si la cuenta se creó donde subtle no estaba (o al revés),
@@ -161,13 +176,4 @@ export async function sha256(text: string): Promise<string> {
     h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0
   }
   return [h0, h1, h2, h3, h4, h5, h6, h7].map((x) => (x >>> 0).toString(16).padStart(8, '0')).join('')
-}
-
-/** Hash viejo del fallback (solo para cuentas creadas antes del arreglo:
- *  si la contraseña coincide con este hash, se entra y se actualiza
- *  al SHA-256 real, para no dejar fuera a nadie). */
-export function legacyLocalHash(text: string): string {
-  let h = 0
-  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0
-  return 'local-' + h.toString(16)
 }

@@ -17,7 +17,7 @@ import { hasSeenPermissionsFlow, markPermissionsFlowSeen } from './lib/permissio
 import { isNative } from './lib/native'
 import type { TrainActivity } from './components/Train'
 import AdminPanel from './components/AdminPanel'
-import { getCurrentUser, getProfile, isAdminUser, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
+import { getCurrentUser, getProfile, isAdminUser, isNetworkError, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
 import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
@@ -60,6 +60,10 @@ export default function App() {
   const [online, setOnline] = useState(() => navigator.onLine)
   const [pending, setPending] = useState(0)
   const [slowLoad, setSlowLoad] = useState(false)
+  // Error real al cargar (no de red): se muestra con botón
+  // Reintentar en vez de dejar la app vacía en silencio. Sin
+  // internet no es error: se entra con el espejo local.
+  const [loadError, setLoadError] = useState('')
   // Versión nueva esperando: main.tsx avisa con 'pulso-sw-update'
   // cuando el service worker nuevo ya se descargó. Mostrar el aviso
   // y que Luis toque Actualizar (skipWaiting + recarga) en vez de
@@ -105,6 +109,7 @@ export default function App() {
   // cuando toca, sin leyenda nuestra.
 
   const loadAll = useCallback(async () => {
+    setLoadError('')
     try {
       const me = await getCurrentUser()
       setUser(me)
@@ -123,9 +128,14 @@ export default function App() {
       // Si algo se hizo sin internet, se sube ahora que hay red.
       if (navigator.onLine) setPending(await syncOutbox())
       else setPending(pendingSyncCount())
-    } catch {
+    } catch (e) {
       // Nunca quedarse en "Cargando" para siempre: si algo falló, se
       // muestra lo que haya (sesión local / espejo) o la pantalla de acceso.
+      // Pero si hay internet y el error NO es de red, se avisa: antes
+      // la app se veía vacía sin explicación.
+      if (navigator.onLine && !isNetworkError(e)) {
+        setLoadError(e instanceof Error ? e.message : 'No se pudieron cargar tus datos.')
+      }
       setPending(pendingSyncCount())
     } finally {
       setLoading(false)
@@ -261,6 +271,19 @@ export default function App() {
       {/* Aviso offline: la app sigue funcionando con lo guardado en el
           teléfono. GPS y música local no necesitan internet; YouTube sí. */}
       {updateBanner}
+      {loadError && (
+        <div className="mx-auto mt-3 max-w-2xl px-4">
+          <div className="flex items-center justify-between gap-3 rounded-3xl bg-red-50 p-3 text-sm shadow-md">
+            <p className="font-semibold text-red-700">⚠️ No se pudieron cargar tus datos: {loadError}</p>
+            <button
+              onClick={() => { setLoading(true); loadAll() }}
+              className="shrink-0 rounded-full bg-pulso px-4 py-2 text-sm font-black text-night"
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      )}
       {!online && (
         <div className="mx-auto mt-3 max-w-2xl px-4">
           <p className="rounded-3xl bg-amber-100 p-3 text-center text-sm font-semibold text-amber-900 shadow-md">

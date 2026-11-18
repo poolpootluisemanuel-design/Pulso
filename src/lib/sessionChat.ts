@@ -12,7 +12,7 @@
 // Nunca se inventan credenciales aquí: se usa el cliente de supabase.ts.
 import { supabase, supabaseConfigured } from './supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import { listRsvps, listSessions } from './store'
+import { addFailedOp, listRsvps, listSessions } from './store'
 import { uid } from './utils'
 
 export interface SessionMessage {
@@ -39,6 +39,15 @@ const POLL_MS = 5000
 // es 'pulso_local_session_messages', como pide el plan.
 const LS_KEY = 'pulso_local_session_messages'
 const LS_PENDING_KEY = 'pulso_local_session_messages_pending'
+// Intentos fallidos (no de red) por mensaje pendiente: a los 3, el
+// mensaje sale de la cola y pasa a fallidos de Perfil.
+const LS_ATTEMPTS_KEY = 'pulso_local_session_messages_attempts'
+function loadAttempts(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(LS_ATTEMPTS_KEY) || '{}') as Record<string, number> } catch { return {} }
+}
+function saveAttempts(a: Record<string, number>): void {
+  try { localStorage.setItem(LS_ATTEMPTS_KEY, JSON.stringify(a)) } catch { /* noop */ }
+}
 
 function loadLocal(): SessionMessage[] {
   try {
@@ -193,22 +202,57 @@ export async function sendSessionMessage(
   return msg
 }
 
+// Borra un mensaje del chat (su autor o un admin, según las
+// políticas de migration_chat_moderation.sql). En modo local se
+// borra del espejo del teléfono.
+export async function deleteSessionMessage(messageId: string): Promise<void> {
+  if (supabaseConfigured && supabase) {
+    const { error } = await withTimeout(supabase.from('session_messages').delete().eq('id', messageId))
+    if (error) throw new Error(error.message)
+  }
+  const all = loadLocal().filter((m) => m.id !== messageId)
+  saveLocal(all)
+}
+
 // Sube a Supabase los mensajes escritos sin internet. Se llama antes
 // de cada lectura y no lanza: si sigue sin red, quedan en la cola.
+// Si un mensaje falla 3 veces por un motivo que NO es la red (ej.
+// la base lo rechaza por no ser participante), sale de la cola y
+// pasa a la lista de fallidos de Perfil, con su motivo.
 export async function syncPendingSessionMessages(): Promise<number> {
   if (!supabaseConfigured || !supabase) return 0
   if (!navigator.onLine) return loadPending().length
   const pending = loadPending()
   if (!pending.length) return 0
   const remaining: SessionMessage[] = []
+  const attempts = loadAttempts()
   for (const msg of pending) {
     try {
       const { error } = await supabase.from('session_messages').upsert(msg, { onConflict: 'id' })
       if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
-    } catch {
-      remaining.push(msg)
+      delete attempts[msg.id]
+    } catch (e) {
+      if (isNetworkError(e)) {
+        remaining.push(msg)
+        continue
+      }
+      const n = (attempts[msg.id] || 0) + 1
+      const errMsg = e instanceof Error ? e.message : String(e)
+      if (n >= 3) {
+        delete attempts[msg.id]
+        addFailedOp({
+          kind: 'chat-message',
+          id: msg.id,
+          error: `Mensaje del chat no se pudo subir: ${errMsg}`,
+          failedAt: new Date().toISOString(),
+        })
+      } else {
+        attempts[msg.id] = n
+        remaining.push(msg)
+      }
     }
   }
+  saveAttempts(attempts)
   savePending(remaining)
   return remaining.length
 }

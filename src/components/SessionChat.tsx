@@ -5,7 +5,7 @@
 // Realtime falla, el polling cada 5 s los trae igual.
 import { useEffect, useRef, useState } from 'react'
 import type { SessionMessage } from '../lib/sessionChat'
-import { listSessionMessages, sendSessionMessage, subscribeSessionMessages } from '../lib/sessionChat'
+import { deleteSessionMessage, listSessionMessages, sendSessionMessage, subscribeSessionMessages } from '../lib/sessionChat'
 import { Btn, Empty, inputCls } from './ui'
 
 function formatHour(iso: string): string {
@@ -20,18 +20,22 @@ export default function SessionChat({
   profileId,
   profileName,
   isParticipant,
+  isAdmin = false,
 }: {
   sessionId: string
   sessionTitle: string
   profileId: string
   profileName: string
   isParticipant: boolean
+  /** El admin también puede borrar mensajes de otros (moderación). */
+  isAdmin?: boolean
 }) {
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -81,6 +85,19 @@ export default function SessionChat({
     }
   }
 
+  // Borrar un mensaje: solo su autor o el admin. Con confirmación
+  // de un toque (primero "¿Borrar?" y luego "Sí, borrar").
+  async function removeMessage(id: string) {
+    setErr('')
+    setConfirmDeleteId(null)
+    try {
+      await deleteSessionMessage(id)
+      setMessages((prev) => prev.filter((m) => m.id !== id))
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'No se pudo borrar el mensaje.')
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-md shadow-night/5">
       {/* Cabecera azul noche PULSO */}
@@ -97,6 +114,7 @@ export default function SessionChat({
         )}
         {messages.map((m) => {
           const mine = m.profile_id === profileId
+          const canDelete = mine || isAdmin
           return (
             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] rounded-2xl px-3 py-2 ${mine ? 'rounded-br-sm bg-pulso text-night' : 'rounded-bl-sm bg-white text-slate-800 shadow-sm'}`}>
@@ -107,6 +125,20 @@ export default function SessionChat({
                 <p className={`text-right text-[11px] ${mine ? 'text-white/70' : 'text-slate-400'}`}>
                   {formatHour(m.created_at)}
                 </p>
+                {canDelete && (
+                  <p className="mt-1 text-right">
+                    {confirmDeleteId === m.id ? (
+                      <span className="flex justify-end gap-2">
+                        <button type="button" className="text-[11px] font-bold text-red-600 underline" onClick={() => void removeMessage(m.id)}>Sí, borrar</button>
+                        <button type="button" className="text-[11px] text-slate-500 underline" onClick={() => setConfirmDeleteId(null)}>Cancelar</button>
+                      </span>
+                    ) : (
+                      <button type="button" className={`text-[11px] underline ${mine ? 'text-white/70' : 'text-slate-400'}`} onClick={() => setConfirmDeleteId(m.id)}>
+                        Borrar
+                      </button>
+                    )}
+                  </p>
+                )}
               </div>
             </div>
           )

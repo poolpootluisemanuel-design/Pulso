@@ -51,6 +51,10 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
   const [rsvps, setRsvps] = useState<Record<string, Rsvp[]>>({})
   // Chat de la sesión abierta (solo una a la vez).
   const [openChatId, setOpenChatId] = useState<string | null>(null)
+  // Cancelar el lugar: primero se pide confirmación de un toque
+  // (para no cancelar por accidente) y luego se hace con try/catch:
+  // si falla, se avisa en vez de dejar creer que ya canceló.
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null)
   // Mapa en vivo: quién entrena ahora (opt-in, presencia efímera).
   const [liveTrainers, setLiveTrainers] = useState<LiveTrainer[]>([])
   const [showLive, setShowLive] = useState(true)
@@ -344,10 +348,27 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                       } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No te pudiste apuntar.') }
                     }}>Me apunto</Btn>
                   )}
-                  {mine && (
-                    <button className="text-sm text-red-500 underline" onClick={async () => { await cancelRsvp(s.id, profile.id); await loadRsvps(s.id) }}>
+                  {mine && confirmCancelId !== s.id && (
+                    <button className="text-sm text-red-500 underline" onClick={() => setConfirmCancelId(s.id)}>
                       Cancelar ({mine.status === 'confirmed' ? 'confirmado' : 'en espera'})
                     </button>
+                  )}
+                  {mine && confirmCancelId === s.id && (
+                    <span className="flex items-center gap-2 text-sm">
+                      <span className="font-semibold">¿Seguro que cancelas tu lugar?</span>
+                      <button className="font-bold text-red-600 underline" onClick={async () => {
+                        setErr('')
+                        setConfirmCancelId(null)
+                        try {
+                          await cancelRsvp(s.id, profile.id)
+                          setMsg('Cancelaste tu lugar en esta sesión.')
+                          await loadRsvps(s.id)
+                        } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo cancelar. Revisa tu internet e inténtalo de nuevo.') }
+                      }}>
+                        Sí, cancelar
+                      </button>
+                      <button className="text-slate-500 underline" onClick={() => setConfirmCancelId(null)}>No</button>
+                    </span>
                   )}
                 </div>
                 {openChatId === s.id && (
@@ -358,6 +379,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                       profileId={profile.id}
                       profileName={profile.name}
                       isParticipant={s.host_id === profile.id || list?.find((r) => r.profile_id === profile.id)?.status === 'confirmed'}
+                      isAdmin={profile.is_admin === true}
                     />
                   </div>
                 )}

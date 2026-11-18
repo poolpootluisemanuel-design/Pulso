@@ -187,21 +187,36 @@ function doPublish(profileId: string, name: string, sport: string, lat: number, 
   void ch.track({ name, sport, lat, lng, updatedAt: lastPublishAt })
 }
 
+/** Redondea coordenadas a 3 decimales (~100 m): el mapa en vivo no
+ *  necesita la ubicación exacta de nadie. Los canales Realtime de
+ *  Supabase son abiertos para quien tenga la anon key (que va
+ *  dentro del APK), así que publicar lat/lng exactos expondría
+ *  dónde entrena cada persona. Con ~100 m se ve la zona sin el
+ *  punto exacto. Para ubicación precisa solo para usuarios
+ *  autenticados, hay que activar Realtime Authorization en el
+ *  panel de Supabase para el canal 'live-training' (ver NATIVE.md). */
+function roundCoord(v: number): number {
+  return Math.round(v * 1000) / 1000
+}
+
 /** Publica (o actualiza) mi posición en vivo. Solo la llama quien
  *  graba con GPS y tiene el opt-in prendido (ver LiveTrainingToggle).
  *  Con throttle de 4 s: si llega otra posición antes, se guarda la
- *  última y se manda al vencer el intervalo. */
+ *  última y se manda al vencer el intervalo. La posición se publica
+ *  redondeada a ~100 m (roundCoord), no exacta. */
 export function publishLivePosition(profileId: string, name: string, sport: string, lat: number, lng: number): void {
+  const rLat = roundCoord(lat)
+  const rLng = roundCoord(lng)
   if (!supabase) {
     // Modo local / sin Supabase: solo yo me veo, sin red, sin romperse.
-    liveMap.set(profileId, { profileId, name, sport, lat, lng, updatedAt: Date.now() })
+    liveMap.set(profileId, { profileId, name, sport, lat: rLat, lng: rLng, updatedAt: Date.now() })
     emit()
     return
   }
   publishing = true
   const now = Date.now()
   if (now - lastPublishAt < PUBLISH_MIN_INTERVAL_MS) {
-    pendingPayload = { profileId, name, sport, lat, lng }
+    pendingPayload = { profileId, name, sport, lat: rLat, lng: rLng }
     if (!pendingTimer) {
       pendingTimer = setTimeout(() => {
         pendingTimer = null
@@ -212,7 +227,7 @@ export function publishLivePosition(profileId: string, name: string, sport: stri
     }
     return
   }
-  doPublish(profileId, name, sport, lat, lng)
+  doPublish(profileId, name, sport, rLat, rLng)
 }
 
 /** Quita mi presencia en vivo de inmediato (terminar, pausar, apagar
