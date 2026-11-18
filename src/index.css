@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-body { background: #f0f4f9; color: #0a1b2e; }
+body { background: #FFF9F0; color: #4A2E28; }
 input, select, textarea { font-size: 16px; }
 
 /* Layout fijo inferior + safe-area (Android 15 edge-to-edge: la

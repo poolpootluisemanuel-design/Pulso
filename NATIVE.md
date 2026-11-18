@@ -4,6 +4,26 @@ La misma web de PULSO, empaquetada como app Android con **Capacitor 8**.
 La web sigue igual: se despliega en Vercel como siempre; Capacitor solo
 lee la carpeta `dist` que genera `npm run build`.
 
+## Rediseño 2026-11-18 (paleta cálida pastel, elegida por Luis)
+
+- **Paleta nueva** (reemplaza azul noche/rojo): fondo marfil `#FFF9F0`,
+  rosa suave `#F2A7B8` (principal), lila `#D9B8E6` (secundario),
+  albaricoque `#FFD9B8`, menta crema `#CDE8C5`, texto marrón `#4A2E28`.
+  Los nombres de clases Tailwind se mantienen como alias
+  (`tailwind.config.js`): `night` = marrón, `pulso` = rosa,
+  `teal` = lila. El texto sobre rosa es marrón oscuro, no blanco.
+  El mapa sigue oscuro (se lee mejor).
+- **Logo nuevo**: P gruesa con línea de pulso, degradado rosa→lila
+  (`src/components/Logo.tsx`, SVG inline, sin archivo de imagen).
+  **PENDIENTE: el ícono launcher de Android** sigue siendo el viejo:
+  cambiarlo requiere subir los PNG por la web de GitHub (el push por
+  API rechaza binarios); no se hizo en este cambio.
+- **Rediseño urgente**: FAB "+" solo en Sesiones (abre el formulario,
+  con etiqueta "Crear"); importadores GPX/reloj colapsados al final de
+  Entrenar en "⋯ Más opciones"; campana del header quitada (indicador
+  falso); un solo botón rosa por pantalla; hero de Inicio compacto
+  (120 px) y sin "Tus deportes".
+
 ## Qué trae esta base
 
 - **App Android `com.pulso.app` ("PULSO")**, con la carpeta `android/`
@@ -35,6 +55,32 @@ lee la carpeta `dist` que genera `npm run build`.
   muestra "Recuperando el mapa…" y al volver a primer plano lo
   re-inicializa con la ruta y la posición actuales; la grabación GPS
   no se toca (vive fuera del mapa).
+- **Entrenamientos del reloj (Samsung Watch, Garmin...)**: plugin
+  `@capgo/capacitor-health` (v8.13.0), método `queryWorkouts()`. En la
+  app instalada, Entrenar tiene la tarjeta "⌚ Traer entrenamientos del
+  reloj": pide permiso de lectura de entrenamientos, lee las sesiones
+  de los últimos 30 días de Health Connect y deja elegir cuáles
+  importar al historial (con aviso de duplicado, mismo criterio que el
+  importador GPX). El entrenamiento importado queda marcado "⌚ Del
+  reloj · Samsung Health" en las notas. No hace falta plugin nativo
+  propio: el plugin ya expone las sesiones con tipo, inicio, fin,
+  duración, distancia y calorías.
+  - **Cómo llega el dato**: el reloj guarda en su app (Samsung Health,
+    Garmin Connect...), esa app lo sincroniza al teléfono y Health
+    Connect lo junta. No hay conexión directa con el reloj ni Bluetooth.
+    Samsung Health: activar "Sincronizar con Health Connect" en sus
+    ajustes. Garmin: activar "Health Connect" en Garmin Connect →
+    Ajustes; si no, las sesiones no aparecen.
+  - **Límites honestos**: no trae la ruta GPS ni la frecuencia
+    cardíaca de la sesión (Health Connect no las expone en este
+    plugin), así que el entrenamiento importado entra sin ruta
+    dibujada. Solo se importan correr, caminar, ciclismo, natación,
+    gym, yoga, CrossFit y surf; otros tipos (fútbol, tenis, esquí...)
+    se cuentan pero no se muestran, para no guardar un deporte
+    inventado. Sin el permiso de historial, Health Connect solo deja
+    leer ~30 días (se pide junto con el permiso; en teléfonos viejos
+    se ignora sin romper nada). Sesiones de menos de 1 minuto no se
+    muestran.
 - **Permisos declarados** en `android/app/src/main/AndroidManifest.xml`:
   ubicación precisa, ubicación en segundo plano (`ACCESS_BACKGROUND_LOCATION`),
   reconocimiento de actividad (pasos) e historial de salud. El servicio
@@ -55,7 +101,8 @@ Al instalarla y al grabar por primera vez, Android pide:
 3. **Actividad física** — para el sensor de pasos mientras grabas.
 4. **Health Connect** — se pide desde la pantalla de Salud del sistema
    (pasos, distancia, entrenamientos). Sin permiso, PULSO sigue
-   funcionando; solo no muestra los pasos de hoy.
+   funcionando; solo no muestra los pasos de hoy ni puede traer los
+   entrenamientos del reloj.
 5. **Health Connect instalado** — Android 14+ lo trae de serie. En
    Android 13 o menos hay que instalar "Health Connect by Android"
    desde Play Store (la app tiene un botón que abre sus ajustes).

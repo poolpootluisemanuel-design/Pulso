@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { Level, Profile, Rsvp, SessionItem } from '../lib/types'
 import { LEVELS, SPORTS, ZONES } from '../lib/types'
 import { cancelRsvp, createSession, joinSession, listRsvps } from '../lib/store'
@@ -31,8 +31,14 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void }) {
+export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0 }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number }) {
   const [showForm, setShowForm] = useState(false)
+  // El botón flotante "+" (App.tsx) abre el formulario de crear: cada
+  // toque suma 1 a createSignal y aquí se abre el formulario.
+  const createSignalRef = useRef(0)
+  useEffect(() => {
+    if (createSignal > createSignalRef.current) { createSignalRef.current = createSignal; setShowForm(true) }
+  }, [createSignal])
   const [title, setTitle] = useState('')
   const [sport, setSport] = useState('Pádel')
   const [level, setLevel] = useState<Level | 'todos'>('todos')
@@ -329,7 +335,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute }
                     💬 Chat
                   </button>
                   {!mine && (
-                    <Btn variant="teal" className="px-3 py-1.5 text-sm" onClick={async () => {
+                    <Btn variant="coral" className="px-3 py-1.5 text-sm" onClick={async () => {
                       setErr('')
                       try {
                         const st = await joinSession(s, profile.id)

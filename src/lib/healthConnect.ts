@@ -4,6 +4,9 @@
 // para mostrar los pasos de hoy y, más adelante, importar entrenamientos.
 // - Solo funciona en la app nativa de Android. En web, isAvailable()
 //   devuelve available:false y estas funciones devuelven null/false.
+//   Las sesiones de ejercicio del reloj se importan aparte, en
+//   src/lib/watchImport.ts (queryWorkouts) con la UI en
+//   src/components/ImportWatch.tsx.
 // - Android 14+ trae Health Connect instalado; en Android 13 o menos el
 //   usuario debe instalar "Health Connect by Android" desde Play Store
 //   (openHealthConnectSettings() lo abre).

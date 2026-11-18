@@ -569,7 +569,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         <>
           <button
             onClick={togglePlay}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-lg font-black text-white"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-lg font-black text-night"
             aria-label={anyPlaying ? 'Pausar música' : 'Reproducir música'}
           >
             {anyPlaying ? '⏸' : '▶'}

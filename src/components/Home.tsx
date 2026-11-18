@@ -28,7 +28,7 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
       {/* Saludo con avatar, como la app de Muse */}
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wider text-pulso">{profile.zone}</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-pulso-dark">{profile.zone}</p>
           <h2 className="truncate text-2xl font-black text-night">Hola, {profile.name} 👋</h2>
         </div>
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-xl font-black text-white shadow-lg shadow-pulso/30">
@@ -36,13 +36,13 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         </div>
       </div>
 
-      {/* Hero con foto de la próxima sesión. Sin internet la foto no carga
-          y queda el degradado azul noche (nunca en blanco). */}
+      {/* Hero compacto con la próxima sesión (120 px, antes 192): la foto
+          decorativa no es contenido del usuario y tapaba lo importante. */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-night to-pulso-dark shadow-lg shadow-night/20">
-        <img src={HERO_IMG} alt="Deporte en equipo" className="h-48 w-full object-cover" onError={(e) => { e.currentTarget.style.opacity = '0' }} />
+        <img src={HERO_IMG} alt="Deporte en equipo" className="h-[120px] w-full object-cover" onError={(e) => { e.currentTarget.style.opacity = '0' }} />
         <div className="absolute inset-0 bg-gradient-to-t from-night via-night/45 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-4 text-white">
-          <span className="rounded-full bg-pulso px-3 py-1 text-xs font-black uppercase tracking-wider">
+          <span className="rounded-full bg-pulso px-3 py-1 text-xs font-black uppercase tracking-wider text-night">
             {next ? `Tu próxima sesión · ${sportEmoji(next.sport)} ${next.sport}` : 'Tu próxima sesión'}
           </span>
           {next ? (
@@ -90,7 +90,7 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         <div className="flex justify-between">
           {week.map((d, i) => (
             <div key={d} className="text-center">
-              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-black shadow-sm ${trainedDays.has(i) ? 'bg-gradient-to-br from-pulso to-pulso-dark text-white' : i === todayIdx ? 'bg-night text-white ring-2 ring-pulso' : 'bg-night-100 text-slate-600'}`}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-black shadow-sm ${trainedDays.has(i) ? 'bg-pulso text-night' : i === todayIdx ? 'bg-night text-white ring-2 ring-pulso' : 'bg-night-100 text-slate-600'}`}>
                 {d.slice(0, 2).toUpperCase()}
               </div>
               <p className="mt-1 text-[11px] font-semibold text-slate-500">{d.slice(0, 3)}</p>
@@ -102,7 +102,7 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
       {/* Próximas sesiones */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-black text-night">Próximas sesiones</h3>
-        <button className="text-sm font-bold text-pulso" onClick={onGoSessions}>Ver todas →</button>
+        <button className="text-sm font-bold text-pulso-dark" onClick={onGoSessions}>Ver todas →</button>
       </div>
       {upcoming.length === 0 ? (
         <Empty text="No hay sesiones próximas. Crea la primera en la pestaña Sesiones." />
@@ -126,16 +126,6 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
           </Card>
         ))
       )}
-
-      {/* Tus deportes */}
-      <Card>
-        <p className="font-black text-night">Tus deportes</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {profile.sports.length === 0
-            ? <p className="text-sm text-slate-500">Completa tu perfil para agregar deportes y nivel.</p>
-            : profile.sports.map((s) => <span key={s.sport} className="rounded-full bg-night px-3 py-1.5 text-sm font-bold text-white">{sportEmoji(s.sport)} {s.sport} · {s.level}</span>)}
-        </div>
-      </Card>
     </div>
   )
 }

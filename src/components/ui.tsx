@@ -25,9 +25,12 @@ export function Btn({
   disabled?: boolean
   className?: string
 }) {
+  // Regla de color (rediseño 2026-11-18): rosa = solo la acción
+  // principal, con texto marrón oscuro encima (el blanco sobre rosa
+  // no se lee). Lila = secundario, también con texto oscuro.
   const styles = {
-    coral: 'bg-gradient-to-r from-pulso to-pulso-dark text-white shadow-lg shadow-pulso/30',
-    teal: 'bg-teal text-white shadow-lg shadow-teal/25',
+    coral: 'bg-pulso text-night shadow-lg shadow-pulso/30',
+    teal: 'bg-teal text-night shadow-lg shadow-teal/25',
     dark: 'bg-night text-white shadow-lg shadow-night/25',
     ghost: 'bg-night-100 text-teal-dark',
   }[variant]

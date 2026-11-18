@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { resetPassword, setNewPasswordLocal, signIn, signUp } from '../lib/store'
 import { mode } from '../lib/store'
+import Logo from './Logo'
 import { Btn, Card, Field, inputCls } from './ui'
 
 // Foto libre (Unsplash, verificada 200): corredora al amanecer.
@@ -63,14 +64,16 @@ export default function Auth({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-night-50 pb-8">
-      {/* Hero visual, como la app de Muse: foto + degradado azul noche → rojo.
+      {/* Hero visual: foto + degradado marrón cálido → rosa.
           Sin internet la foto no carga y queda el degradado (nunca en blanco). */}
       <div className="relative overflow-hidden bg-gradient-to-b from-night via-night to-pulso-dark">
         <img src={HERO_IMG} alt="Entrenando al amanecer en Cancún" className="h-72 w-full object-cover" onError={(e) => { e.currentTarget.style.opacity = '0' }} />
         <div className="absolute inset-0 bg-gradient-to-b from-night/70 via-night/35 to-night" />
         <div className="absolute inset-x-0 bottom-0 p-5 text-white">
           <div className="flex items-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pulso text-3xl font-black shadow-lg shadow-pulso/40">P</div>
+            <div className="rounded-2xl bg-[#FFF9F0]/95 p-1.5 shadow-lg shadow-night/30">
+              <Logo size={52} />
+            </div>
             <div>
               <h1 className="text-4xl font-black tracking-wide">PULSO</h1>
               <p className="font-bold text-pulso-light">Entrena con pulso</p>
@@ -97,7 +100,7 @@ export default function Auth({ onDone }: { onDone: () => void }) {
             <h2 className="text-xl font-black text-night">
               {view === 'login' ? 'Entra a tu cuenta' : view === 'register' ? 'Crea tu cuenta' : 'Recupera tu cuenta'}
             </h2>
-            <span className="rounded-full bg-pulso/10 px-2.5 py-1 text-xs font-bold text-pulso">Cancún 🌊</span>
+            <span className="rounded-full bg-pulso/10 px-2.5 py-1 text-xs font-bold text-pulso-dark">Cancún 🌊</span>
           </div>
           <p className="mb-4 text-sm text-slate-500">
             {view === 'login'
@@ -131,7 +134,7 @@ export default function Auth({ onDone }: { onDone: () => void }) {
               <div className="space-y-2 rounded-2xl bg-night-50 p-3 text-center">
                 <p className="text-sm font-semibold text-night">Te llegó un correo de Supabase para confirmar tu cuenta.</p>
                 <a href="https://mail.google.com/mail/u/0/#inbox" target="_blank" rel="noreferrer"
-                  className="block w-full rounded-2xl bg-pulso py-3 text-base font-black text-white">
+                  className="block w-full rounded-2xl bg-pulso py-3 text-base font-black text-night">
                   📧 Ir a Gmail para verificar
                 </a>
                 <button type="button" className="w-full text-sm font-semibold text-teal-dark underline"

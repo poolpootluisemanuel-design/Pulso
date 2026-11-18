@@ -133,7 +133,7 @@ export default function AdminPanel({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold">
                         {p.name}{' '}
-                        {p.is_admin ? <span className="rounded-full bg-pulso/10 px-2 py-0.5 text-[11px] font-bold text-pulso">Admin</span> : null}{' '}
+                        {p.is_admin ? <span className="rounded-full bg-pulso/10 px-2 py-0.5 text-[11px] font-bold text-pulso-dark">Admin</span> : null}{' '}
                         {p.is_blocked ? <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">🚫 Bloqueado</span> : null}
                       </p>
                       <p className="text-xs text-slate-500">{p.zone}{p.sports.length ? ` · ${p.sports.map((s) => s.sport).join(', ')}` : ''}</p>
@@ -149,7 +149,7 @@ export default function AdminPanel({
                       )}
                       {canBlock && blockConfirmId === p.id && (
                         <span className="flex gap-1">
-                          <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-white" onClick={() => void toggleBlock(p)}>{p.is_blocked ? 'Sí, desbloquear' : 'Sí, bloquear'}</button>
+                          <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-night" onClick={() => void toggleBlock(p)}>{p.is_blocked ? 'Sí, desbloquear' : 'Sí, bloquear'}</button>
                           <button className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold" onClick={() => setBlockConfirmId(null)}>Cancelar</button>
                         </span>
                       )}
@@ -189,7 +189,7 @@ export default function AdminPanel({
                 </div>
                 {confirmId === s.id ? (
                   <span className="flex gap-1">
-                    <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-white" onClick={() => void removeSession(s.id)}>Sí, borrar</button>
+                    <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-night" onClick={() => void removeSession(s.id)}>Sí, borrar</button>
                     <button className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold" onClick={() => setConfirmId(null)}>Cancelar</button>
                   </span>
                 ) : (
@@ -213,7 +213,7 @@ export default function AdminPanel({
                 </div>
                 {confirmId === p.id ? (
                   <span className="flex gap-1">
-                    <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-white" onClick={() => void removePost(p.id)}>Sí, borrar</button>
+                    <button className="rounded-full bg-pulso px-3 py-1.5 text-xs font-bold text-night" onClick={() => void removePost(p.id)}>Sí, borrar</button>
                     <button className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold" onClick={() => setConfirmId(null)}>Cancelar</button>
                   </span>
                 ) : (

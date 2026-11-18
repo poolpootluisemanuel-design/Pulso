@@ -15,7 +15,7 @@ import { Btn, Card, Tag } from './ui'
 const DIFFICULTY_COLOR: Record<string, string> = {
   'Fácil': 'bg-teal/10 text-teal-dark',
   'Media': 'bg-amber-100 text-amber-800',
-  'Exigente': 'bg-pulso/10 text-pulso',
+  'Exigente': 'bg-pulso/10 text-pulso-dark',
 }
 
 type Filter = 'cerca' | 'isla' | 'cancun' | 'todas'

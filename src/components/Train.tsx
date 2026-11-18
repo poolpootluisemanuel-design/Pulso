@@ -9,6 +9,7 @@ import type { RecommendedRoute } from '../lib/routes'
 import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
 import ImportWorkout from './ImportWorkout'
+import ImportWatch from './ImportWatch'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
 
 function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; h?: number }) {
@@ -21,9 +22,9 @@ function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; 
   const d = route.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.lng).toFixed(1)},${y(p.lat).toFixed(1)}`).join(' ')
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="mt-2 w-full rounded-xl bg-sage-100">
-      <path d={d} fill="none" stroke="#14B8A6" strokeWidth="3" strokeLinecap="round" />
+      <path d={d} fill="none" stroke="#7E57A8" strokeWidth="3" strokeLinecap="round" />
       <circle cx={x(route[0].lng)} cy={y(route[0].lat)} r="5" fill="#22c55e" />
-      <circle cx={x(route[route.length - 1].lng)} cy={y(route[route.length - 1].lat)} r="5" fill="#E63946" />
+      <circle cx={x(route[route.length - 1].lng)} cy={y(route[route.length - 1].lat)} r="5" fill="#D14D72" />
     </svg>
   )
 }
@@ -133,11 +134,6 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
         </form>
       </Card>
 
-      {/* Importar desde Strava / Garmin / Google Fit: el archivo se lee
-          en el teléfono, se muestra una vista previa y se guarda como
-          un entrenamiento normal (rachas, medallas y retos). */}
-      <ImportWorkout profile={profile} workouts={workouts} onRefresh={onRefresh} />
-
       <h3 className="text-lg font-bold">Tu historial</h3>
       {workouts.length === 0 ? <Empty text="Aún no hay entrenamientos. Graba tu primera caminata con GPS o regístrala manual." /> : (
         <div className="space-y-2">
@@ -163,6 +159,22 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
           ))}
         </div>
       )}
+
+      {/* Importar entrenamientos (GPX/TCX o del reloj): colapsado al
+          final, después del historial — es de uso ocasional y antes
+          tapaba lo principal de Entrenar. */}
+      <details className="rounded-3xl border border-slate-100 bg-white p-4 shadow-md shadow-night/5">
+        <summary className="cursor-pointer font-bold text-night">⋯ Más opciones: importar entrenamientos</summary>
+        <div className="mt-3 space-y-4">
+          {/* Importar desde Strava / Garmin / Google Fit: el archivo se lee
+              en el teléfono, se muestra una vista previa y se guarda como
+              un entrenamiento normal (rachas, medallas y retos). */}
+          <ImportWorkout profile={profile} workouts={workouts} onRefresh={onRefresh} />
+          {/* Entrenamientos grabados en el reloj (Samsung Watch, Garmin...)
+              vía Health Connect: solo sale en la app nativa. */}
+          <ImportWatch profile={profile} workouts={workouts} onRefresh={onRefresh} />
+        </div>
+      </details>
     </div>
   )
 }

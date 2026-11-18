@@ -89,7 +89,7 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
       <h2 className="text-2xl font-black text-teal-dark">Mi perfil</h2>
       <Card>
         <div className="flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-coral text-2xl font-black text-white">{profile.name.slice(0, 1).toUpperCase()}</div>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-coral text-2xl font-black text-night">{profile.name.slice(0, 1).toUpperCase()}</div>
           <div>
             <p className="text-lg font-bold">{profile.name}</p>
             <p className="text-sm text-slate-600">{user.email}</p>
@@ -139,7 +139,7 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
             <div className="flex flex-wrap gap-2">
               {DAYS.map((d) => (
                 <button key={d} type="button" onClick={() => toggleDay(d)}
-                  className={`rounded-full px-3 py-1.5 text-sm font-semibold ${availability.includes(d) ? 'bg-coral text-white' : 'bg-sage-100 text-teal-dark'}`}>
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold ${availability.includes(d) ? 'bg-coral text-night' : 'bg-sage-100 text-teal-dark'}`}>
                   {d}
                 </button>
               ))}

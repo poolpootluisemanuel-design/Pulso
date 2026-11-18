@@ -426,18 +426,18 @@ export default function MapView({
             satélite es el default: en oscuro la isla es casi todo mar. */}
         <div className="absolute left-2 top-2 z-10 flex gap-1.5">
           <button type="button" onClick={() => switchBasemap('dark')} aria-label="Mapa oscuro"
-            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'dark' ? 'bg-pulso text-white' : 'bg-night/90 text-white'}`}>
+            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'dark' ? 'bg-pulso text-night' : 'bg-night/90 text-white'}`}>
             🌙 Oscuro
           </button>
           <button type="button" onClick={() => switchBasemap('satellite')} aria-label="Mapa satélite"
-            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'satellite' ? 'bg-pulso text-white' : 'bg-night/90 text-white'}`}>
+            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${basemap === 'satellite' ? 'bg-pulso text-night' : 'bg-night/90 text-white'}`}>
             🛰️ Satélite
           </button>
         </div>
         {/* Controles 3D estilo Strava: 2D/3D, girar, inclinar. */}
         <div className="absolute right-2 top-2 z-10 flex flex-col gap-1.5">
           <button type="button" onClick={toggle3d} aria-label="Cambiar vista 2D o 3D"
-            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${is3d ? 'bg-pulso text-white' : 'bg-night/90 text-white'}`}>
+            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${is3d ? 'bg-pulso text-night' : 'bg-night/90 text-white'}`}>
             {is3d ? '3D ✓' : '2D'}
           </button>
           <button type="button" onClick={() => rotate(-45)} aria-label="Girar el mapa a la izquierda"

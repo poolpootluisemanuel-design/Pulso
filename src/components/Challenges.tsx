@@ -12,7 +12,7 @@ export default function Challenges({ workouts, challenges, businesses = [] }: { 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-black text-teal-dark">Retos y logros</h2>
-      <Card className="bg-coral text-white">
+      <Card className="bg-coral text-night">
         <p className="text-sm opacity-80">🔥 Racha actual</p>
         <p className="text-3xl font-black">{streak} {streak === 1 ? 'día' : 'días'} seguidos</p>
         <p className="text-sm opacity-80">{workouts.length} entrenamientos · {totalKm.toFixed(1)} km</p>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Logo from './components/Logo'
 import Auth from './components/Auth'
 import Challenges from './components/Challenges'
 import Community from './components/Community'
@@ -67,7 +68,9 @@ export default function App() {
   // Ruta recomendada elegida en Sesiones → Mapa → "Recorrer esta
   // ruta": Entrenar abre el GPS con esa ruta como guía teal.
   const [guideRoute, setGuideRoute] = useState<RecommendedRoute | null>(null)
-  // Mini tutorial (4 tarjetas) y flujo de permisos: solo al primer
+  // Botón flotante "+ Crear" de Sesiones: cada toque suma 1 y
+  // SessionsTab abre el formulario.
+  const [createSignal, setCreateSignal] = useState(0)
   // inicio con sesión, nunca en la pantalla de acceso y nunca en web
   // (los permisos solo existen en la app nativa). Se guardan en
   // localStorage para no volver a salir solos; se reabren desde Perfil.
@@ -200,7 +203,7 @@ export default function App() {
         <p className="text-sm font-semibold">✨ Hay una versión nueva de PULSO</p>
         <button
           onClick={() => window.__pulsoApplyUpdate?.()}
-          className="shrink-0 rounded-full bg-pulso px-4 py-2 text-sm font-black text-white"
+          className="shrink-0 rounded-full bg-pulso px-4 py-2 text-sm font-black text-night"
         >
           Actualizar
         </button>
@@ -210,11 +213,11 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-night">
+      <div className="flex min-h-screen items-center justify-center bg-[#FFF9F0]">
         <div className="text-center">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-pulso text-3xl font-black text-white">P</div>
-          <p className="text-lg font-black text-white">Cargando PULSO…</p>
-          {slowLoad && <p className="mt-2 px-6 text-sm text-white/70">Tardando… si no tienes internet, la app entra en modo offline con tus datos guardados.</p>}
+          <Logo size={72} withWordmark />
+          <p className="mt-3 text-lg font-black text-night">Cargando PULSO…</p>
+          {slowLoad && <p className="mt-2 px-6 text-sm text-slate-500">Tardando… si no tienes internet, la app entra en modo offline con tus datos guardados.</p>}
         </div>
       </div>
     )
@@ -231,29 +234,24 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-night-50 font-sans text-slate-800">
-      {/* Encabezado estilo app de Muse: logo, avatar y notificaciones.
-          pulso-header: padding-top con safe-area para que en Android
-          nativo no quede debajo de la barra de estado del teléfono. */}
-      <header className="pulso-header sticky top-0 z-10 bg-night px-4 pb-3 text-white shadow-lg shadow-night/20">
+      {/* Encabezado claro (paleta cálida 2026-11-18): logo PULSO, avatar.
+          Sin campana: el punto rojo era falso (se prendía con cualquier
+          publicación, no con algo nuevo para ti). */}
+      <header className="pulso-header sticky top-0 z-10 border-b border-[#F2DCC6] bg-[#FFF9F0]/95 px-4 pb-3 text-night shadow-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pulso text-lg font-black">P</div>
+            <Logo size={36} />
             <div>
               <p className="text-lg font-black leading-none tracking-wide">PULSO</p>
-              <p className="text-[11px] text-white/70">Entrena con pulso · {profile.zone}</p>
+              <p className="text-[11px] text-slate-500">Entrena con pulso · {profile.zone}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="hidden rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90 sm:block">
+            <span className="hidden rounded-full bg-night-100 px-2.5 py-1 text-[11px] font-bold text-night sm:block">
               {!online ? '● Sin internet' : mode === 'supabase' ? '● En línea' : '● Modo local'}
             </span>
-            <button onClick={() => setTab('comunidad')} aria-label="Notificaciones y comunidad"
-              className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-lg">
-              🔔
-              {posts.length > 0 && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-pulso ring-2 ring-night" />}
-            </button>
             <button onClick={() => setTab('perfil')} aria-label="Mi perfil"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-base font-black">
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-pulso text-base font-black text-night">
               {profile.name.slice(0, 1).toUpperCase()}
             </button>
           </div>
@@ -282,7 +280,7 @@ export default function App() {
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
         {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} onRunRoute={(r) => { setGuideRoute(r); setTab('entrenar') }} />}
+        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} onRunRoute={(r) => { setGuideRoute(r); setTab('entrenar') }} />}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
@@ -331,29 +329,27 @@ export default function App() {
         />
       </div>
 
-      {/* Botón flotante para crear sesión. Se esconde en Entrenar y
-          cuando la hoja de música está expandida, para no taparla ni
-          que ella lo tape. En las demás pestañas va siempre encima
-          del contenedor fijo (nav 64 + música 64 + margen 16, con
-          safe-area; con GPS activo la barrita añade 52 px). Solo dos
-          posiciones fijas, no salta. */}
-      {tab !== 'entrenar' && !musicExpanded && (
-        <button onClick={() => setTab('sesiones')} aria-label="Crear sesión"
-          className={`pulso-fab fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-pulso to-pulso-dark text-3xl font-black text-white shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
-          +
+      {/* Botón flotante para crear sesión: SOLO en Sesiones (antes salía
+          en todas las pestañas y nadie sabía qué creaba el "+"). Con
+          etiqueta "Crear" y texto oscuro sobre rosa. Se esconde en
+          Entrenar y cuando la hoja de música está expandida. */}
+      {tab === 'sesiones' && !musicExpanded && (
+        <button onClick={() => setCreateSignal((n) => n + 1)} aria-label="Crear sesión"
+          className={`pulso-fab fixed right-4 z-20 flex h-14 items-center gap-1 rounded-full bg-pulso px-5 text-base font-black text-night shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
+          <span className="text-2xl leading-none">+</span> Crear
         </button>
       )}
 
       <nav className="pulso-nav fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex h-full max-w-2xl">
           {[...TABS, ...(admin ? [{ id: 'admin' as Tab, label: 'Admin', icon: '🛠️' }] : [])].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso' : 'text-slate-400'}`}>
+            <button key={t.id} onClick={() => setTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}
               {/* El indicador ocupa siempre su sitio (transparente si
                   no es la pestaña activa): antes solo existía en la
                   activa y la altura de la navegación cambiaba. */}
-              <span className={`mt-1 h-1 w-6 rounded-full ${tab === t.id ? 'bg-pulso' : 'bg-transparent'}`} />
+              <span className={`mt-1 h-1 w-6 rounded-full ${tab === t.id ? 'bg-pulso-dark' : 'bg-transparent'}`} />
             </button>
           ))}
         </div>

@@ -100,7 +100,7 @@ export default function LiveTrainingLayer({
           type="button"
           onClick={() => onToggle(!visible)}
           aria-pressed={visible}
-          className={`rounded-full px-3 py-2 text-sm font-bold shadow-sm ${visible ? 'bg-pulso text-white' : 'bg-white text-slate-600'}`}
+          className={`rounded-full px-3 py-2 text-sm font-bold shadow-sm ${visible ? 'bg-pulso text-night' : 'bg-white text-slate-600'}`}
         >
           {visible ? '🔴' : '⚪'} Entrenando ahora{trainers.length > 0 ? ` (${trainers.length})` : ''}
         </button>
