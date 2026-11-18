@@ -9,8 +9,8 @@ const HERO_IMG = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=12
 
 const SPORT_CHIPS = ['🏃 Running', '🎾 Pádel', '💪 CrossFit', '🚴 Ciclismo', '🏄 Surf', '🏊 Natación']
 
-export default function Auth({ onDone }: { onDone: () => void }) {
-  const [view, setView] = useState<'login' | 'register' | 'recover'>('login')
+export default function Auth({ onDone, onGuest, initialView }: { onDone: () => void; onGuest?: () => void; initialView?: 'login' | 'register' | 'recover' }) {
+  const [view, setView] = useState<'login' | 'register' | 'recover'>(initialView ?? 'login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -174,6 +174,19 @@ export default function Auth({ onDone }: { onDone: () => void }) {
               </button>
             )}
           </div>
+
+          {/* Vista previa sin cuenta: entra a ver sesiones, mapa,
+              rutas, comunidad y negocios. Apuntarse, publicar,
+              chatear y grabar con GPS piden crear cuenta gratis. */}
+          {onGuest && (
+            <button
+              type="button"
+              onClick={onGuest}
+              className="mt-4 block w-full rounded-2xl bg-white py-3 text-base font-black text-teal-dark shadow-sm"
+            >
+              👀 Explorar sin cuenta
+            </button>
+          )}
         </Card>
 
         <div className="mt-4 flex items-center justify-center gap-4 text-center">

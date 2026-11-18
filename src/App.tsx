@@ -20,6 +20,8 @@ import AdminPanel from './components/AdminPanel'
 import Businesses from './components/Businesses'
 import MoreMenu, { type MoreOption } from './components/MoreMenu'
 import UpdatePrompt from './components/UpdatePrompt'
+import GuestGate from './components/GuestGate'
+import { enterGuestMode, exitGuestMode, isGuestMode, GUEST_PROFILE } from './lib/guest'
 import { checkAppUpdate, type RemoteVersion } from './lib/appUpdate'
 import { getCurrentUser, getProfile, isAdminUser, isNetworkError, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
@@ -39,6 +41,16 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  // Modo invitado: ver la app sin cuenta (vista previa). El invitado
+  // ve sesiones, mapa, rutas, comunidad, negocios y retos, pero no
+  // puede apuntarse, crear, publicar, chatear ni grabar con GPS: esas
+  // acciones abren la hoja GuestGate. La bandera vive en
+  // localStorage (ver lib/guest.ts) y sobrevive al cerrar la app.
+  const [guest, setGuest] = useState(() => isGuestMode())
+  const [guestGate, setGuestGate] = useState(false)
+  // Vista de la pantalla de acceso al salir de invitado para crear
+  // cuenta: el registro, no el login.
+  const [authView, setAuthView] = useState<'login' | 'register' | 'recover'>('login')
   const [tab, setTab] = useState<Tab>('inicio')
   const [loading, setLoading] = useState(true)
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -85,17 +97,36 @@ export default function App() {
     if (t === 'mas') setMoreView('menu')
     setTab(t)
   }
+  // Entrar como invitado desde la pantalla de acceso: se guarda la
+  // bandera y se recargan las listas públicas.
+  function goGuest() {
+    enterGuestMode()
+    setGuest(true)
+    setLoading(true)
+    loadAll()
+  }
+  // Salir de invitado para crear cuenta: se quita la bandera y se
+  // vuelve a la pantalla de acceso en la vista de registro.
+  function goCreateAccount() {
+    exitGuestMode()
+    setGuest(false)
+    setGuestGate(false)
+    setUser(null)
+    setProfile(null)
+    setAuthView('register')
+  }
   // Aviso de actualización del APK (version.json remoto): si hay
   // versión nueva, sale el modal con "Actualizar ahora" / "Después".
   // "Después" solo lo cierra esta vez; vuelve a salir al abrir la app.
+  // También se revisa en modo invitado: el aviso es del APK, no de la cuenta.
   const [updateInfo, setUpdateInfo] = useState<RemoteVersion | null>(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
   useEffect(() => {
-    if (!user) return
+    if (!user && !guest) return
     let alive = true
     void checkAppUpdate().then((v) => { if (alive && v) setUpdateInfo(v) })
     return () => { alive = false }
-  }, [user])
+  }, [user, guest])
   // inicio con sesión, nunca en la pantalla de acceso y nunca en web
   // (los permisos solo existen en la app nativa). Se guardan en
   // localStorage para no volver a salir solos; se reabren desde Perfil.
@@ -103,7 +134,7 @@ export default function App() {
   const [showPermissions, setShowPermissions] = useState(false)
   const firstRunRef = useRef(false)
   useEffect(() => {
-    if (!user || !profile || firstRunRef.current) return
+    if (!user || !profile || guest || firstRunRef.current) return
     firstRunRef.current = true
     if (!hasSeenTutorial()) setShowTutorial(true)
     else if (isNative() && !hasSeenPermissionsFlow()) setShowPermissions(true)
@@ -132,6 +163,26 @@ export default function App() {
   const loadAll = useCallback(async () => {
     setLoadError('')
     try {
+      // Modo invitado: solo lecturas públicas, sin sesión ni usuario.
+      // Cada lista se protege por separado: si la base no deja leer
+      // algo sin cuenta, esa lista queda vacía (estado vacío honesto)
+      // en vez de dejar la app en blanco o con un error que asuste.
+      // Nunca se inventan datos de demostración.
+      if (isGuestMode()) {
+        const [ps, ss, ch, po, bu] = await Promise.all([
+          listProfiles().catch(() => [] as Profile[]),
+          listSessions().catch(() => [] as SessionItem[]),
+          listChallenges().catch(() => [] as Challenge[]),
+          listPosts().catch(() => [] as Post[]),
+          listBusinesses().catch(() => [] as Business[]),
+        ])
+        setProfiles(ps); setSessions(ss); setChallenges(ch); setPosts(po); setBusinesses(bu)
+        setWorkouts([])
+        setUser(null)
+        setProfile(GUEST_PROFILE)
+        setPending(pendingSyncCount())
+        return
+      }
       const me = await getCurrentUser()
       setUser(me)
       if (!me) { setLoading(false); return }
@@ -174,7 +225,7 @@ export default function App() {
   // botón "Detectar mi zona con GPS". Una sola vez por teléfono.
   const zoneCheckedRef = useRef(false)
   useEffect(() => {
-    if (!profile || profile.zone !== 'Cancún centro' || zoneCheckedRef.current) return
+    if (!profile || guest || profile.zone !== 'Cancún centro' || zoneCheckedRef.current) return
     zoneCheckedRef.current = true
     try {
       if (localStorage.getItem('pulso_zone_auto') === '1') return
@@ -211,9 +262,11 @@ export default function App() {
   }, [loading])
 
   // Al volver internet: subir lo hecho offline y recargar.
+  // En modo invitado no hay nada que subir: solo recargar listas.
   useEffect(() => {
     const goOnline = () => {
       setOnline(true)
+      if (guest) { loadAll(); return }
       void syncOutbox().then((n) => { setPending(n); loadAll() })
     }
     const goOffline = () => { setOnline(false); setPending(pendingSyncCount()) }
@@ -223,7 +276,7 @@ export default function App() {
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
     }
-  }, [loadAll])
+  }, [loadAll, guest])
 
   // Aviso de versión nueva: toca Actualizar y la app recarga con el
   // ajuste nuevo, sin borrar caché ni datos. Se muestra también en
@@ -254,11 +307,21 @@ export default function App() {
     )
   }
 
-  if (!user || !profile) {
+  // Sin perfil no se entra (en invitado loadAll pone el perfil de
+  // solo lectura GUEST_PROFILE); sin usuario y sin invitado, acceso.
+  if (!profile) {
     return (
       <div className="min-h-screen bg-night-50 font-sans text-slate-800">
         {updateBanner}
-        <Auth onDone={() => { setLoading(true); loadAll() }} />
+        <Auth onDone={() => { setLoading(true); loadAll() }} onGuest={goGuest} initialView={authView} />
+      </div>
+    )
+  }
+  if (!user && !guest) {
+    return (
+      <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+        {updateBanner}
+        <Auth onDone={() => { setLoading(true); loadAll() }} onGuest={goGuest} initialView={authView} />
       </div>
     )
   }
@@ -279,15 +342,34 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden rounded-full bg-night-100 px-2.5 py-1 text-[11px] font-bold text-night sm:block">
-              {!online ? '● Sin internet' : mode === 'supabase' ? '● En línea' : '● Modo local'}
+              {!online ? '● Sin internet' : guest ? '● Explorando' : mode === 'supabase' ? '● En línea' : '● Modo local'}
             </span>
-            <button onClick={() => { setMoreView('perfil'); setTab('mas') }} aria-label="Mi perfil"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-pulso text-base font-black text-night">
-              {profile.name.slice(0, 1).toUpperCase()}
-            </button>
+            {guest ? (
+              <button onClick={goCreateAccount} className="rounded-full bg-pulso px-3 py-2 text-xs font-black text-night shadow">
+                Crear cuenta
+              </button>
+            ) : (
+              <button onClick={() => { setMoreView('perfil'); setTab('mas') }} aria-label="Mi perfil"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-pulso text-base font-black text-night">
+                {profile.name.slice(0, 1).toUpperCase()}
+              </button>
+            )}
           </div>
         </div>
       </header>
+
+      {/* Aviso de modo invitado: visible en todas las pantallas,
+          con el botón para crear cuenta siempre a la mano. */}
+      {guest && (
+        <div className="mx-auto mt-3 max-w-2xl px-4">
+          <div className="flex items-center justify-between gap-3 rounded-3xl bg-pulso/15 p-3 text-sm shadow-md">
+            <p className="font-semibold text-night">👀 Estás explorando sin cuenta</p>
+            <button onClick={goCreateAccount} className="shrink-0 rounded-full bg-pulso px-4 py-2 text-sm font-black text-night">
+              Crear cuenta
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Aviso offline: la app sigue funcionando con lo guardado en el
           teléfono. GPS y música local no necesitan internet; YouTube sí. */}
@@ -323,14 +405,41 @@ export default function App() {
 
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
+        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
-            y el reproductor siguen vivos en cualquier pestaña. */}
-        <div className={tab === 'entrenar' ? '' : 'hidden'}>
-          <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
-        </div>
+            y el reproductor siguen vivos en cualquier pestaña.
+            En modo invitado NO se monta Entrenar: grabar con GPS
+            necesita cuenta. Sale una tarjeta que lo explica y lleva
+            a crear cuenta (la música sigue en Más → Música). */}
+        {guest ? (
+          tab === 'entrenar' ? (
+            <div className="space-y-4">
+              <h2 className="text-2xl font-black text-teal-dark">Entrenar</h2>
+              <div className="rounded-3xl bg-white p-5 text-center shadow-md">
+                <p className="text-4xl">🏃</p>
+                <p className="mt-2 text-lg font-black text-night">Grabar con GPS necesita cuenta</p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                  Para grabar tu ruta, guardar entrenamientos y contar pasos, crea tu cuenta gratis.
+                  Mientras, puedes ver las sesiones y las rutas recomendadas sin cuenta.
+                </p>
+                <div className="mt-4 space-y-2">
+                  <button onClick={goCreateAccount} className="w-full rounded-2xl bg-pulso py-3 text-base font-black text-night">
+                    Crear mi cuenta gratis
+                  </button>
+                  <button onClick={() => goTab('sesiones')} className="w-full py-2 text-sm font-bold text-teal-dark underline">
+                    Ver sesiones
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null
+        ) : (
+          <div className={tab === 'entrenar' ? '' : 'hidden'}>
+            <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
+          </div>
+        )}
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} businesses={businesses} />}
         {/* Menú Más: Buscar, Comunidad, Negocios, Música, Perfil,
             Soy coach y Administración ya no son pestañas fijas. */}
@@ -342,6 +451,8 @@ export default function App() {
             {moreView === 'menu' && (
               <MoreMenu
                 isAdmin={admin}
+                guest={guest}
+                onCreateAccount={goCreateAccount}
                 onSelect={(opt) => {
                   // Música: no es una vista, abre el reproductor
                   // persistente (hoja inferior) y se queda en el menú.
@@ -350,16 +461,16 @@ export default function App() {
                 }}
               />
             )}
-            {moreView === 'buscar' && <Search profiles={profiles} meId={user.id} />}
-            {moreView === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
+            {moreView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} />}
+            {moreView === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
             {moreView === 'negocios' && <Businesses businesses={businesses} />}
-            {moreView === 'perfil' && (
+            {moreView === 'perfil' && user && (
               <ProfileTab user={user} profile={profile} posts={posts} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} onGoAdmin={() => setMoreView('admin')} />
             )}
             {moreView === 'coach' && (
               <CoachPanel profile={profile} onCreateSession={() => { setCreateSignal((n) => n + 1); goTab('sesiones') }} />
             )}
-            {moreView === 'admin' && admin && (
+            {moreView === 'admin' && admin && user && (
               <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
             )}
           </>
@@ -398,8 +509,9 @@ export default function App() {
       {/* Botón flotante para crear sesión: SOLO en Sesiones (antes salía
           en todas las pestañas y nadie sabía qué creaba el "+"). Con
           etiqueta "Crear" y texto oscuro sobre rosa. Se esconde en
-          Entrenar y cuando la hoja de música está expandida. */}
-      {tab === 'sesiones' && !musicExpanded && (
+          Entrenar, cuando la hoja de música está expandida y en modo
+          invitado (crear sesión necesita cuenta). */}
+      {tab === 'sesiones' && !musicExpanded && !guest && (
         <button onClick={() => setCreateSignal((n) => n + 1)} aria-label="Crear sesión"
           className={`pulso-fab fixed right-4 z-20 flex h-14 items-center gap-1 rounded-full bg-pulso px-5 text-base font-black text-night shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
           <span className="text-2xl leading-none">+</span> Crear
@@ -453,6 +565,12 @@ export default function App() {
           hay versión nueva en version.json remoto. */}
       {updateInfo && !updateDismissed && (
         <UpdatePrompt version={updateInfo} onLater={() => setUpdateDismissed(true)} />
+      )}
+
+      {/* Hoja de "Crea tu cuenta gratis": sale en modo invitado al
+          tocar apuntarse, crear, publicar o chatear. */}
+      {guestGate && (
+        <GuestGate onCreateAccount={goCreateAccount} onClose={() => setGuestGate(false)} />
       )}
     </div>
   )

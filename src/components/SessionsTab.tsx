@@ -31,14 +31,16 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0 }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number }) {
+export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0, guest = false, onNeedAccount }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void }) {
   const [showForm, setShowForm] = useState(false)
   // El botón flotante "+" (App.tsx) abre el formulario de crear: cada
   // toque suma 1 a createSignal y aquí se abre el formulario.
+  // En modo invitado el botón no existe, pero si llegara la señal se
+  // ignora: crear sesión necesita cuenta.
   const createSignalRef = useRef(0)
   useEffect(() => {
-    if (createSignal > createSignalRef.current) { createSignalRef.current = createSignal; setShowForm(true) }
-  }, [createSignal])
+    if (createSignal > createSignalRef.current) { createSignalRef.current = createSignal; if (!guest) setShowForm(true) }
+  }, [createSignal, guest])
   const [title, setTitle] = useState('')
   const [sport, setSport] = useState('Pádel')
   const [level, setLevel] = useState<Level | 'todos'>('todos')
@@ -203,7 +205,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-black text-teal-dark">Sesiones y eventos</h2>
-        <Btn variant="coral" onClick={() => setShowForm(!showForm)}>+ Crear</Btn>
+        <Btn variant="coral" onClick={() => { if (guest) { onNeedAccount?.(); return } setShowForm(!showForm) }}>+ Crear</Btn>
       </div>
 
       {msg && <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">{msg}</p>}
@@ -333,6 +335,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                     Ver quién va ({confirmed})
                   </button>
                   <button className="text-sm font-semibold text-teal-dark underline" onClick={async () => {
+                    if (guest) { onNeedAccount?.(); return }
                     await loadRsvps(s.id)
                     setOpenChatId(openChatId === s.id ? null : s.id)
                   }}>
@@ -340,6 +343,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                   </button>
                   {!mine && (
                     <Btn variant="coral" className="px-3 py-1.5 text-sm" onClick={async () => {
+                      if (guest) { onNeedAccount?.(); return }
                       setErr('')
                       try {
                         const st = await joinSession(s, profile.id)

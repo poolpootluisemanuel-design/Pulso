@@ -19,7 +19,7 @@ const GROUP_SPORTS: { label: string; words: string[] }[] = [
   { label: 'Gym', words: ['gym', 'gimnasio'] },
 ]
 
-export default function Community({ profile, posts, businesses, onRefresh }: { profile: Profile; posts: Post[]; businesses: Business[]; onRefresh: () => void }) {
+export default function Community({ profile, posts, businesses, onRefresh, guest = false, onNeedAccount }: { profile: Profile; posts: Post[]; businesses: Business[]; onRefresh: () => void; guest?: boolean; onNeedAccount?: () => void }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState('')
   // Grupo seleccionado: 'Todos' o un deporte. Filtra el feed por
@@ -45,6 +45,8 @@ export default function Community({ profile, posts, businesses, onRefresh }: { p
   async function publish(e: React.FormEvent) {
     e.preventDefault()
     setErr('')
+    // En modo invitado no se puede publicar: se pide crear cuenta.
+    if (guest) { onNeedAccount?.(); return }
     try {
       await createPost(profile.id, profile.name, text)
       setText('')
@@ -84,6 +86,11 @@ export default function Community({ profile, posts, businesses, onRefresh }: { p
             onChange={(e) => setText(e.target.value)} placeholder="¿Qué entrenaste hoy?" />
           {err && <p className="text-sm text-red-600">{err}</p>}
           <Btn type="submit" variant="teal" className="w-full">Publicar</Btn>
+          {guest && (
+            <p className="text-center text-xs font-semibold text-slate-500">
+              Para publicar, crea tu cuenta gratis.
+            </p>
+          )}
         </form>
       </Card>
 
