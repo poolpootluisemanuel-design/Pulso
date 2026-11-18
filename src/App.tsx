@@ -17,21 +17,23 @@ import { hasSeenPermissionsFlow, markPermissionsFlowSeen } from './lib/permissio
 import { isNative } from './lib/native'
 import type { TrainActivity } from './components/Train'
 import AdminPanel from './components/AdminPanel'
+import Businesses from './components/Businesses'
+import MoreMenu, { type MoreOption } from './components/MoreMenu'
+import UpdatePrompt from './components/UpdatePrompt'
+import { checkAppUpdate, type RemoteVersion } from './lib/appUpdate'
 import { getCurrentUser, getProfile, isAdminUser, isNetworkError, listAllWorkouts, listBusinesses, listChallenges, listPosts, listProfiles, listSessions, listWorkouts, mode, pendingSyncCount, saveProfile, syncOutbox } from './lib/store'
 import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout } from './lib/types'
 import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
 
-type Tab = 'inicio' | 'buscar' | 'sesiones' | 'entrenar' | 'retos' | 'comunidad' | 'perfil' | 'admin'
+type Tab = 'inicio' | 'sesiones' | 'entrenar' | 'retos' | 'mas'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'inicio', label: 'Inicio', icon: '🏠' },
-  { id: 'buscar', label: 'Buscar', icon: '🔍' },
   { id: 'sesiones', label: 'Sesiones', icon: '📅' },
   { id: 'entrenar', label: 'Entrenar', icon: '🏃' },
   { id: 'retos', label: 'Retos', icon: '🏅' },
-  { id: 'comunidad', label: 'Comunidad', icon: '💬' },
-  { id: 'perfil', label: 'Perfil', icon: '👤' },
+  { id: 'mas', label: 'Más', icon: '⋯' },
 ]
 
 export default function App() {
@@ -75,6 +77,25 @@ export default function App() {
   // Botón flotante "+ Crear" de Sesiones: cada toque suma 1 y
   // SessionsTab abre el formulario.
   const [createSignal, setCreateSignal] = useState(0)
+  // Menú "Más" (5ª pestaña): qué vista muestra dentro de Más.
+  // 'menu' es la lista (Buscar, Comunidad, Negocios, Música, Perfil,
+  // Soy coach, Administración). Al salir de Más se vuelve al menú.
+  const [moreView, setMoreView] = useState<MoreOption | 'menu'>('menu')
+  function goTab(t: Tab) {
+    if (t === 'mas') setMoreView('menu')
+    setTab(t)
+  }
+  // Aviso de actualización del APK (version.json remoto): si hay
+  // versión nueva, sale el modal con "Actualizar ahora" / "Después".
+  // "Después" solo lo cierra esta vez; vuelve a salir al abrir la app.
+  const [updateInfo, setUpdateInfo] = useState<RemoteVersion | null>(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
+  useEffect(() => {
+    if (!user) return
+    let alive = true
+    void checkAppUpdate().then((v) => { if (alive && v) setUpdateInfo(v) })
+    return () => { alive = false }
+  }, [user])
   // inicio con sesión, nunca en la pantalla de acceso y nunca en web
   // (los permisos solo existen en la app nativa). Se guardan en
   // localStorage para no volver a salir solos; se reabren desde Perfil.
@@ -260,7 +281,7 @@ export default function App() {
             <span className="hidden rounded-full bg-night-100 px-2.5 py-1 text-[11px] font-bold text-night sm:block">
               {!online ? '● Sin internet' : mode === 'supabase' ? '● En línea' : '● Modo local'}
             </span>
-            <button onClick={() => setTab('perfil')} aria-label="Mi perfil"
+            <button onClick={() => { setMoreView('perfil'); setTab('mas') }} aria-label="Mi perfil"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-pulso text-base font-black text-night">
               {profile.name.slice(0, 1).toUpperCase()}
             </button>
@@ -301,9 +322,8 @@ export default function App() {
       )}
 
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
-        {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => setTab('sesiones')} />}
-        {tab === 'buscar' && <Search profiles={profiles} meId={user.id} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} onRunRoute={(r) => { setGuideRoute(r); setTab('entrenar') }} />}
+        {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} />}
+        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
@@ -312,28 +332,50 @@ export default function App() {
           <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
         </div>
         {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} businesses={businesses} />}
-        {tab === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
-        {tab === 'perfil' && (<>
-          <ProfileTab user={user} profile={profile} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} />
-          <CoachPanel profile={profile} onCreateSession={() => setTab('sesiones')} />
-        </>)}
-        {tab === 'admin' && admin && (
-          <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
+        {/* Menú Más: Buscar, Comunidad, Negocios, Música, Perfil,
+            Soy coach y Administración ya no son pestañas fijas. */}
+        {tab === 'mas' && (
+          <>
+            {moreView !== 'menu' && (
+              <button onClick={() => setMoreView('menu')} className="mb-3 text-sm font-bold text-pulso-dark">← Más</button>
+            )}
+            {moreView === 'menu' && (
+              <MoreMenu
+                isAdmin={admin}
+                onSelect={(opt) => {
+                  // Música: no es una vista, abre el reproductor
+                  // persistente (hoja inferior) y se queda en el menú.
+                  if (opt === 'musica') { setMusicExpanded(true); return }
+                  setMoreView(opt)
+                }}
+              />
+            )}
+            {moreView === 'buscar' && <Search profiles={profiles} meId={user.id} />}
+            {moreView === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} />}
+            {moreView === 'negocios' && <Businesses businesses={businesses} />}
+            {moreView === 'perfil' && (
+              <ProfileTab user={user} profile={profile} posts={posts} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} onGoAdmin={() => setMoreView('admin')} />
+            )}
+            {moreView === 'coach' && (
+              <CoachPanel profile={profile} onCreateSession={() => { setCreateSignal((n) => n + 1); goTab('sesiones') }} />
+            )}
+            {moreView === 'admin' && admin && (
+              <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
+            )}
+          </>
         )}
       </main>
 
       {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
-          fijo, siempre en el mismo sitio (encima de la navegación, con
-          pulso-music-dock: bottom = altura del nav + safe-area). La
-          música empieza recogida en mini-barra en TODAS las pestañas
-          (también en Entrenar) y solo se expande a una hoja baja de
-          40vh cuando Luis la abre; al cambiar de pestaña se recoge
-          sola. Así no tapa el contenido ni la barra inferior. */}
+          fijo. Mientras se graba con GPS, la barrita de GPS
+          REEMPLAZA a la mini-barra de música (no se suma): antes las
+          dos se apilaban y tapaban contenido. En Entrenar la música
+          sigue abajo como siempre, porque el GPS ya se ve en pantalla. */}
       <div id="pulso-music" className="pulso-music-dock fixed left-0 right-0 z-20 mx-auto max-w-2xl px-3">
-        {tab !== 'entrenar' && activity.gps?.active && (
+        {tab !== 'entrenar' && activity.gps?.active ? (
           <button
-            onClick={() => setTab('entrenar')}
-            className="mb-2 flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"
+            onClick={() => goTab('entrenar')}
+            className="flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"
           >
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 animate-pulse rounded-full bg-pulso" />
@@ -341,15 +383,16 @@ export default function App() {
             </span>
             <span className="ml-auto shrink-0 text-teal">Volver →</span>
           </button>
+        ) : (
+          <MusicPlayer
+            profileId={profile.id}
+            compact={tab !== 'entrenar'}
+            expanded={musicExpanded}
+            onExpandedChange={setMusicExpanded}
+            onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
+            onGoTrain={() => goTab('entrenar')}
+          />
         )}
-        <MusicPlayer
-          profileId={profile.id}
-          compact={tab !== 'entrenar'}
-          expanded={musicExpanded}
-          onExpandedChange={setMusicExpanded}
-          onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
-          onGoTrain={() => setTab('entrenar')}
-        />
       </div>
 
       {/* Botón flotante para crear sesión: SOLO en Sesiones (antes salía
@@ -365,9 +408,11 @@ export default function App() {
 
       <nav className="pulso-nav fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex h-full max-w-2xl">
-          {[...TABS, ...(admin ? [{ id: 'admin' as Tab, label: 'Admin', icon: '🛠️' }] : [])].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
-              <span className="text-lg leading-none">{t.icon}</span>
+          {TABS.map((t) => (
+            <button key={t.id} onClick={() => goTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
+              {/* Entrenar es la pestaña central: círculo rosa para que
+                  se vea como el botón principal de la app. */}
+              <span className={`flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none ${t.id === 'entrenar' ? 'bg-pulso text-night shadow-md shadow-pulso/40' : ''}`}>{t.icon}</span>
               {t.label}
               {/* El indicador ocupa siempre su sitio (transparente si
                   no es la pestaña activa): antes solo existía en la
@@ -402,6 +447,12 @@ export default function App() {
             setShowPermissions(false)
           }}
         />
+      )}
+
+      {/* Aviso de actualización del APK: sale al abrir la app cuando
+          hay versión nueva en version.json remoto. */}
+      {updateInfo && !updateDismissed && (
+        <UpdatePrompt version={updateInfo} onLater={() => setUpdateDismissed(true)} />
       )}
     </div>
   )

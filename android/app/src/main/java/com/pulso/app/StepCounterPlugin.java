@@ -179,6 +179,40 @@ public class StepCounterPlugin extends Plugin {
         call.resolve(result);
     }
 
+    // Total crudo del sensor (pasos desde el último reinicio del
+    // teléfono), para la tarjeta "Pasos hoy" de Inicio. NO toca la
+    // base de la grabación: si hay una grabación en curso, el
+    // listener ya está activo y solo se lee latestTotal; si no, se
+    // registra el listener para empezar a recibir el total. El
+    // total de hoy se calcula en TS restando la base guardada a las
+    // 00:00 en localStorage (ver src/lib/todaySteps.ts). Si todavía
+    // no llegó ningún evento del sensor, devuelve total:-1.
+    @PluginMethod
+    public void getTotalSteps(PluginCall call) {
+        if (getStepSensor() == null) {
+            call.reject("Este teléfono no tiene contador de pasos del sistema.", "UNAVAILABLE");
+            return;
+        }
+        if (!activityGranted()) {
+            call.reject("Falta el permiso de Actividad física. Actívalo en Ajustes → PULSO → Permisos → Actividad física.",
+                    "PERMISSION_DENIED");
+            return;
+        }
+        if (!listening) {
+            SensorManager sm = getSensorManager();
+            if (sm == null) {
+                call.reject("No se pudo leer el sensor de pasos.", "UNAVAILABLE");
+                return;
+            }
+            sm.registerListener(listener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
+            listening = true;
+        }
+        JSObject result = new JSObject();
+        result.put("total", latestTotal < 0 ? -1 : Math.round(latestTotal));
+        result.put("available", true);
+        call.resolve(result);
+    }
+
     @PluginMethod
     public void stopCounting(PluginCall call) {
         int steps = stepsSoFar();

@@ -19,6 +19,8 @@ interface StepCounterPlugin {
   requestPermission(): Promise<{ granted: boolean }>
   startCounting(): Promise<{ started: boolean }>
   getSteps(): Promise<{ steps: number; available: boolean; counting: boolean }>
+  /** Total crudo del sensor (desde el último reinicio del teléfono). */
+  getTotalSteps(): Promise<{ total: number; available: boolean }>
   stopCounting(): Promise<{ steps: number }>
 }
 
@@ -86,5 +88,19 @@ export async function stopStepCounting(): Promise<number> {
     return (await StepCounter.stopCounting()).steps
   } catch {
     return 0
+  }
+}
+
+/** Total crudo del sensor (pasos desde el último reinicio del
+ *  teléfono). null si no hay sensor, no hay permiso o todavía no
+ *  llegó ningún evento del sensor. No toca la base de la grabación
+ *  en curso: solo lee el total. */
+export async function getTotalSteps(): Promise<number | null> {
+  if (!stepCounterSupported()) return null
+  try {
+    const r = await StepCounter.getTotalSteps()
+    return r.total >= 0 ? r.total : null
+  } catch {
+    return null
   }
 }

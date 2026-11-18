@@ -21,6 +21,7 @@ export default function SessionChat({
   profileName,
   isParticipant,
   isAdmin = false,
+  onClose,
 }: {
   sessionId: string
   sessionTitle: string
@@ -29,6 +30,8 @@ export default function SessionChat({
   isParticipant: boolean
   /** El admin también puede borrar mensajes de otros (moderación). */
   isAdmin?: boolean
+  /** Cerrar la hoja del chat. */
+  onClose?: () => void
 }) {
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [draft, setDraft] = useState('')
@@ -101,9 +104,16 @@ export default function SessionChat({
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-md shadow-night/5">
       {/* Cabecera azul noche PULSO */}
-      <div className="bg-night px-4 py-3">
-        <p className="font-bold text-white">💬 Chat de la sesión</p>
-        <p className="truncate text-xs text-white/70">{sessionTitle}</p>
+      <div className="flex items-start justify-between gap-2 bg-night px-4 py-3">
+        <div className="min-w-0">
+          <p className="font-bold text-white">💬 Chat de la sesión</p>
+          <p className="truncate text-xs text-white/70">{sessionTitle}</p>
+        </div>
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Cerrar chat" className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-sm font-bold text-white">
+            ✕
+          </button>
+        )}
       </div>
 
       {/* Lista de mensajes */}

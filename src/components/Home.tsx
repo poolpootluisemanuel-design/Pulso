@@ -1,6 +1,7 @@
 import type { Profile, SessionItem, Workout } from '../lib/types'
-import { computeStreak, formatDate, weekdayName } from '../lib/utils'
+import { formatDate, weekdayName } from '../lib/utils'
 import { Card, Empty, Tag } from './ui'
+import TodaySteps from './TodaySteps'
 
 // Foto libre (Unsplash, verificada 200): deporte / atletismo.
 const HERO_IMG = 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=1200&q=80&auto=format&fit=crop'
@@ -15,7 +16,6 @@ function sportEmoji(sport: string) {
 }
 
 export default function Home({ profile, sessions, workouts, onGoSessions }: { profile: Profile; sessions: SessionItem[]; workouts: Workout[]; onGoSessions: () => void }) {
-  const streak = computeStreak(workouts)
   const today = new Date().toISOString().slice(0, 10)
   const upcoming = sessions.filter((s) => s.date >= today).slice(0, 3)
   const next = upcoming[0]
@@ -67,19 +67,14 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         </div>
       </div>
 
-      {/* Racha y entrenamientos */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card className="bg-night !p-4 text-white">
-          <p className="text-sm font-bold text-white/80">🔥 Tu racha</p>
-          <p className="text-3xl font-black">{streak} <span className="text-base">{streak === 1 ? 'día' : 'días'}</span></p>
-          <p className="text-xs text-white/70">Sigue así, no la pierdas</p>
-        </Card>
-        <Card className="!p-4">
-          <p className="text-sm font-bold text-slate-500">🏅 Entrenamientos</p>
-          <p className="text-3xl font-black text-night">{workouts.length}</p>
-          <p className="text-xs text-slate-500">Registrados en PULSO</p>
-        </Card>
-      </div>
+      {/* Pasos hoy (contador del sistema) + entrenamientos.
+          La racha ya NO vive aquí: solo en Retos. */}
+      <TodaySteps />
+      <Card className="!p-4">
+        <p className="text-sm font-bold text-slate-500">🏅 Entrenamientos</p>
+        <p className="text-3xl font-black text-night">{workouts.length}</p>
+        <p className="text-xs text-slate-500">Registrados en PULSO</p>
+      </Card>
 
       {/* Tu semana */}
       <Card>

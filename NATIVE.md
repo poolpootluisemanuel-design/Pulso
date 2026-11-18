@@ -384,3 +384,18 @@ Authentication → Policies que no queden dos políticas
 contradictorias sobre la misma tabla. Si `profiles_public` no
 existe aún, la app cae al espejo local para perfiles (los
 nombres pueden verse vacíos hasta correrla).
+
+## Aviso de actualización del APK (desde el paquete de rediseño)
+
+- Al abrir, la app descarga `public/version.json` remoto de GitHub
+  (raw, rama main) y compara su `versionCode` con `APP_BUILD` de
+  `src/lib/appUpdate.ts`. Si el remoto es mayor, sale el modal "Hay
+  una actualización" con "Actualizar ahora" (abre el apkUrl) y
+  "Después" (vuelve a salir al abrir). Sin internet o si falla la
+  revisión, no sale nada y la app sigue igual.
+- Proceso de cada release (¡no olvidar!):
+  1. Subir `APP_BUILD` y `versionCode` en `public/version.json` al
+     mismo número nuevo.
+  2. Compilar y subir el APK nuevo al descargador directo.
+  3. Actualizar `apkUrl` en `public/version.json` con el enlace
+     nuevo (se lee en remoto, no hace falta recompilar).

@@ -371,23 +371,40 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                     </span>
                   )}
                 </div>
-                {openChatId === s.id && (
-                  <div className="mt-3">
-                    <SessionChat
-                      sessionId={s.id}
-                      sessionTitle={s.title}
-                      profileId={profile.id}
-                      profileName={profile.name}
-                      isParticipant={s.host_id === profile.id || list?.find((r) => r.profile_id === profile.id)?.status === 'confirmed'}
-                      isAdmin={profile.is_admin === true}
-                    />
-                  </div>
-                )}
+                {/* El chat ya NO se abre inline dentro de la tarjeta:
+                    es una hoja inferior que SOLO se abre al tocar el
+                    botón 💬 de una sesión, nunca al entrar a Sesiones.
+                    La hoja se renderiza al final del componente. */}
               </Card>
             )
           })}
         </div>
       ))}
+      {/* Hoja del chat de la sesión abierta (una a la vez). */}
+      {(() => {
+        const chatSession = sessions.find((s) => s.id === openChatId) ?? null
+        if (!chatSession) return null
+        const list = rsvps[chatSession.id]
+        const isParticipant = chatSession.host_id === profile.id || list?.find((r) => r.profile_id === profile.id)?.status === 'confirmed'
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-night/50" onClick={() => setOpenChatId(null)}>
+            <div
+              className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-[#FFF9F0] p-3 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <SessionChat
+                sessionId={chatSession.id}
+                sessionTitle={chatSession.title}
+                profileId={profile.id}
+                profileName={profile.name}
+                isParticipant={isParticipant}
+                isAdmin={profile.is_admin === true}
+                onClose={() => setOpenChatId(null)}
+              />
+            </div>
+          </div>
+        )
+      })()}
       <p className="text-center text-xs text-slate-500">Zonas disponibles: {ZONES.join(' · ')}</p>
     </div>
   )

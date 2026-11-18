@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import type { AuthUser, Profile } from '../lib/types'
+import type { AuthUser, Post, Profile } from '../lib/types'
 import { DAYS, LEVELS, SPORTS, ZONES } from '../lib/types'
-import { changePassword, clearFailedOp, listFailedOps, saveProfile, signOut, type FailedOp } from '../lib/store'
+import { changePassword, clearFailedOp, deletePost, listFailedOps, saveProfile, signOut, type FailedOp } from '../lib/store'
 import { detectZone } from '../lib/utils'
 import { isNative } from '../lib/native'
-import { Btn, Card, Field, inputCls, selectCls } from './ui'
+import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
+import PublicProfile from './PublicProfile'
 
 const FAILED_KIND_LABEL: Record<string, string> = {
   workout: 'Entrenamiento',
@@ -17,7 +18,7 @@ const FAILED_KIND_LABEL: Record<string, string> = {
   'chat-message': 'Mensaje del chat',
 }
 
-export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShowTutorial, onShowPermissions }: { user: AuthUser; profile: Profile; onRefresh: () => void; onSignOut: () => void; onShowTutorial?: () => void; onShowPermissions?: () => void }) {
+export default function ProfileTab({ user, profile, posts, onRefresh, onSignOut, onShowTutorial, onShowPermissions, onGoAdmin }: { user: AuthUser; profile: Profile; posts: Post[]; onRefresh: () => void; onSignOut: () => void; onShowTutorial?: () => void; onShowPermissions?: () => void; onGoAdmin?: () => void }) {
   const [name, setName] = useState(profile.name)
   const [zone, setZone] = useState(profile.zone)
   const [bio, setBio] = useState(profile.bio)
@@ -64,6 +65,21 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
   // un motivo que no es la red): se muestran aquí con el motivo,
   // para no hacer creer que se guardaron. Se pueden descartar.
   const [failedOps, setFailedOps] = useState<FailedOp[]>(() => listFailedOps())
+  // Vista previa "Ver como me ven": el mismo perfil público que ven
+  // los demás en Comunidad, sin correo ni botones de editar.
+  const [showPreview, setShowPreview] = useState(false)
+  // Borrar una publicación propia: dos toques para confirmar.
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const myPosts = posts.filter((p) => p.profile_id === profile.id)
+
+  async function removePost(id: string) {
+    setErr('')
+    try {
+      await deletePost(id)
+      setDeleteConfirm(null)
+      onRefresh()
+    } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo borrar la publicación.') }
+  }
 
   function toggleSport(sport: string) {
     setSports((prev) =>
@@ -111,7 +127,47 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
             <p className="text-sm text-slate-500">{profile.zone}</p>
           </div>
         </div>
+        <Btn variant="teal" className="mt-3 w-full" onClick={() => setShowPreview(true)}>
+          👀 Ver como me ven
+        </Btn>
+        <p className="mt-1 text-center text-xs text-slate-500">
+          Así se ve tu perfil para los demás: sin tu correo y sin botones de editar.
+        </p>
       </Card>
+
+      <Card>
+        <p className="mb-2 font-black text-night">Mis publicaciones ({myPosts.length})</p>
+        {myPosts.length === 0 ? (
+          <Empty text="Aún no has publicado nada en Comunidad." />
+        ) : (
+          <ul className="space-y-2">
+            {myPosts.map((p) => (
+              <li key={p.id} className="rounded-xl bg-sage-100 p-2">
+                <p className="text-xs text-slate-500">{new Date(p.created_at).toLocaleString('es-MX')}</p>
+                <p className="mt-0.5 text-sm">{p.text}</p>
+                <button
+                  className="mt-1 text-xs font-bold text-red-600 underline"
+                  onClick={() => {
+                    if (deleteConfirm === p.id) removePost(p.id)
+                    else setDeleteConfirm(p.id)
+                  }}
+                >
+                  {deleteConfirm === p.id ? '¿Seguro? Toca de nuevo para borrar' : 'Borrar'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {showPreview && (
+        <PublicProfile
+          profile={profile}
+          posts={myPosts}
+          title="Así te ven los demás"
+          onClose={() => setShowPreview(false)}
+        />
+      )}
 
       <Card>
         <form onSubmit={save} className="space-y-3">
@@ -185,6 +241,11 @@ export default function ProfileTab({ user, profile, onRefresh, onSignOut, onShow
           <Btn variant="teal" className="w-full" onClick={() => onShowTutorial?.()}>📖 Ver tutorial</Btn>
           {isNative() && (
             <Btn variant="ghost" className="w-full" onClick={() => onShowPermissions?.()}>🔐 Dar todos los permisos</Btn>
+          )}
+          {/* Administración: el Admin ya no es pestaña fija; se entra
+              desde aquí o desde el menú Más (solo el dueño). */}
+          {profile.is_admin === true && onGoAdmin && (
+            <Btn variant="dark" className="w-full" onClick={onGoAdmin}>🛠️ Administración</Btn>
           )}
         </div>
         <p className="mt-2 text-xs text-slate-500">
