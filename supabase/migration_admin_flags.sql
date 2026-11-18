@@ -5,6 +5,15 @@
 -- Cómo usarlo: en tu proyecto Supabase ve a SQL Editor, pega
 -- todo este archivo y pulsa Run. No borra nada que ya exista.
 --
+-- ORDEN IMPORTANTE: este archivo DEBE correrse ANTES que
+-- migration_profiles_public.sql, migration_chat_moderation.sql
+-- y migration_challenges_businesses_admin.sql, porque esos
+-- usan la tabla admin_flags y la función is_admin() que se
+-- crean aquí. Y DENTRO de este archivo el orden también
+-- importa: primero la tabla admin_flags, DESPUÉS la función
+-- is_admin() (si la función se crea antes que la tabla,
+-- Postgres la rechaza con ERROR 42P01).
+--
 -- PROBLEMA QUE ARREGLA: la política "cada quien edita su perfil"
 -- era `for all` sobre profiles y no limitaba QUÉ columnas se
 -- podían cambiar: cualquier usuario autenticado podía hacer
@@ -19,22 +28,7 @@
 -- La app lee el rol desde admin_flags (ver src/lib/store.ts).
 -- ============================================================
 
--- Función auxiliar (security definer, para no hacer recursión en
--- las políticas): ¿el usuario actual es admin?
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.admin_flags
-    where profile_id = auth.uid() and is_admin = true
-  );
-$$;
-
--- Tabla de permisos: una fila por usuario.
+-- 1) PRIMERO la tabla de permisos: una fila por usuario.
 create table if not exists public.admin_flags (
   profile_id uuid primary key references public.profiles(id) on delete cascade,
   is_admin boolean not null default false,
@@ -42,8 +36,9 @@ create table if not exists public.admin_flags (
   updated_at timestamptz not null default now()
 );
 
--- Migrar los valores que ya existían en profiles (sin borrar nada):
+-- 2) Migrar los valores que ya existían en profiles (sin borrar nada):
 -- si alguien ya era admin o estaba bloqueado, su fila pasa aquí.
+-- Luis ya es admin en profiles.is_admin = true y NO debe perderlo.
 insert into public.admin_flags (profile_id, is_admin, is_blocked)
 select id,
   coalesce(is_admin, false),
@@ -59,6 +54,23 @@ where email = 'pool.poot.luis.emanuel@gmail.com'
 on conflict (profile_id) do update set is_admin = true;
 
 alter table public.admin_flags enable row level security;
+
+-- 3) AHORA SÍ la función auxiliar (security definer, para no hacer
+-- recursión en las políticas): ¿el usuario actual es admin?
+-- Se crea DESPUÉS de la tabla porque la consulta dentro de la
+-- función se valida al crearla; antes daba ERROR 42P01.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admin_flags
+    where profile_id = auth.uid() and is_admin = true
+  );
+$$;
 
 -- Cada quien puede VER su propia fila (para saber si está bloqueado).
 drop policy if exists "ver flags propios" on public.admin_flags;

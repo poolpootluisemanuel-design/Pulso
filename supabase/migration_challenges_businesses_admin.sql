@@ -14,6 +14,10 @@
 -- SOLUCIÓN: crear, editar y borrar retos y negocios solo lo
 -- puede hacer un admin. La lectura sigue siendo pública.
 -- Requiere: migration_admin_flags.sql (función public.is_admin()).
+--
+-- ORDEN: correr DESPUÉS de migration_admin_flags.sql, porque las
+-- políticas de abajo usan public.is_admin(). Si se corre antes,
+-- da ERROR 42883 (function public.is_admin() does not exist).
 -- ============================================================
 
 -- Retos: solo admin crea, edita y borra.

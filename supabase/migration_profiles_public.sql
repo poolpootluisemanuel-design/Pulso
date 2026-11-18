@@ -18,6 +18,10 @@
 -- La vista la crea el rol postgres (dueño), así que no pasa por
 -- el RLS de la tabla base; el select de profiles queda limitado
 -- a la propia fila (o al admin).
+--
+-- ORDEN: correr DESPUÉS de migration_admin_flags.sql, porque la
+-- vista usa la tabla admin_flags y la política de abajo usa la
+-- función public.is_admin(). Si se corre antes, da ERROR 42P01.
 -- ============================================================
 
 -- Vista pública: mismos datos que ve la app, sin email.

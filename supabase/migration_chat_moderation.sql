@@ -17,6 +17,15 @@
 -- (el cliente ya no lo decide), y el autor o un admin pueden
 -- borrar mensajes.
 -- Requiere: migration_admin_flags.sql (función public.is_admin()).
+--
+-- NOTA DE TIPOS (ERROR 42883 corregido 2026-11-18): las
+-- comparaciones con auth.uid() y con session_id llevan cast
+-- explícito a ::text en AMBOS lados. En el archivo schema.sql
+-- profile_id/host_id son uuid y session_id es text, pero la base
+-- real difiere en alguna de esas columnas y Postgres rechazaba
+-- la comparación text = uuid. Con ::text en ambos lados la
+-- comparación funciona sea cual sea el tipo real de la columna
+-- (el texto canónico de un uuid es el mismo en ambos lados).
 -- ============================================================
 
 -- Escribir solo si eres participante confirmado o el anfitrión.
@@ -24,18 +33,18 @@ drop policy if exists "mensajes propios" on public.session_messages;
 drop policy if exists "mensajes de participantes" on public.session_messages;
 create policy "mensajes de participantes" on public.session_messages
   for insert with check (
-    auth.uid() = profile_id
+    auth.uid()::text = profile_id::text
     and (
       exists (
         select 1 from public.rsvps r
-        where r.session_id = session_messages.session_id
-          and r.profile_id = auth.uid()
+        where r.session_id::text = session_messages.session_id::text
+          and r.profile_id::text = auth.uid()::text
           and r.status = 'confirmed'
       )
       or exists (
         select 1 from public.sessions s
-        where s.id = session_messages.session_id
-          and s.host_id = auth.uid()
+        where s.id::text = session_messages.session_id::text
+          and s.host_id::text = auth.uid()::text
       )
     )
   );
@@ -43,7 +52,7 @@ create policy "mensajes de participantes" on public.session_messages
 -- Borrar: el autor de su propio mensaje, o un admin.
 drop policy if exists "borrar mensaje propio" on public.session_messages;
 create policy "borrar mensaje propio" on public.session_messages
-  for delete using (auth.uid() = profile_id);
+  for delete using (auth.uid()::text = profile_id::text);
 
 drop policy if exists "admins borran mensajes" on public.session_messages;
 create policy "admins borran mensajes" on public.session_messages
@@ -59,7 +68,7 @@ set search_path = public
 as $$
 begin
   new.author_name := coalesce(
-    (select name from public.profiles where id = new.profile_id),
+    (select name from public.profiles where id::text = new.profile_id::text),
     'Sin nombre'
   );
   return new;
