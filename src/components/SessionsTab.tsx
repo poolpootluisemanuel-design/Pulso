@@ -194,7 +194,10 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-black text-teal-dark">Sesiones y eventos</h2>
-        <Btn variant="coral" onClick={() => { if (guest) { onNeedAccount?.(); return } setShowForm(!showForm) }}>+ Crear</Btn>
+        {/* Solo un botón para crear: con cuenta es el flotante "+"
+            (App.tsx); en modo invitado el flotante no existe, así que
+            aquí queda el botón que abre la puerta a crear cuenta. */}
+        {guest && <Btn variant="coral" onClick={() => onNeedAccount?.()}>+ Crear</Btn>}
       </div>
 
       {msg && <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">{msg}</p>}
