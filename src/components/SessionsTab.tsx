@@ -11,6 +11,8 @@ import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
 // de mapa, no en la primera carga de la app.
 const MapView = lazy(() => import('./MapView'))
 import type { MapMarker } from './MapView'
+import MapBottomSheet from './MapBottomSheet'
+import type { SheetState } from './MapBottomSheet'
 import { zoneCenter } from '../lib/routes'
 
 const SPORT_EMOJI: Record<string, string> = {
@@ -27,7 +29,7 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export default function SessionsTab({ profile, sessions, onRefresh, createSignal = 0, guest = false, onNeedAccount }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void }) {
+export default function SessionsTab({ profile, sessions, onRefresh, createSignal = 0, guest = false, onNeedAccount, gpsActive = false, onMapImmersiveChange }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void; gpsActive?: boolean; onMapImmersiveChange?: (active: boolean) => void }) {
   const [showForm, setShowForm] = useState(false)
   // El botón flotante "+" (App.tsx) abre el formulario de crear: cada
   // toque suma 1 a createSignal y aquí se abre el formulario.
@@ -58,6 +60,9 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
   const [showLive, setShowLive] = useState(true)
   // Vista Lista / Mapa y ubicación del lugar al crear la sesión.
   const [view, setView] = useState<'lista' | 'mapa'>('lista')
+  // Estado de la hoja inferior inmersiva (contraída / media /
+  // expandida). Empieza en media, como antes.
+  const [sheetState, setSheetState] = useState<SheetState>('medium')
   // Suscripción al mapa en vivo: solo en vista mapa.
   useEffect(() => {
     if (view !== 'mapa') return
@@ -160,10 +165,30 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
   const youMarker: MapMarker[] = gpsCenter ? [
     { key: 'yo', lat: gpsCenter.lat, lng: gpsCenter.lng, emoji: '🧍', color: '#0A1B2E', popupHtml: '<b>Estás aquí</b>' },
   ] : []
-  // En Isla Mujeres el mapa oscuro es casi todo mar gris: allí el
-  // mapa arranca en satélite (se ve la isla real). El usuario puede
-  // cambiarlo con el selector y su elección se guarda.
-  const defaultBasemap = profile.zone === 'Isla Mujeres' ? 'satellite' as const : 'dark' as const
+  // El mapa abre en el deportivo (MapView: 'sport' por defecto, con
+  // satélite de respaldo si falla); la elección se guarda.
+
+  // Vista inmersiva del mapa (Fase 1): Sesiones → Mapa a pantalla
+  // completa cuando hay sesiones con ubicación que mostrar. Sin
+  // sesiones con ubicación, la vista de mapa sigue siendo la de antes
+  // (mensaje vacío), sin overlay. La lista no cambia: solo cambia
+  // dónde se dibuja el mapa. Las rutas viven en su propia pestaña.
+  const showImmersiveMap = view === 'mapa' && withCoords.length > 0
+  // Avisar a App (esconde el FAB "+" que el overlay taparía) y
+  // bloquear el scroll de la página detrás mientras el mapa inmersivo
+  // está abierto.
+  useEffect(() => {
+    onMapImmersiveChange?.(showImmersiveMap)
+    // Al desmontar (cambiar de pestaña con el mapa abierto), avisar
+    // que ya no está inmersivo para no dejar el FAB escondido.
+    return () => { onMapImmersiveChange?.(false) }
+  }, [showImmersiveMap, onMapImmersiveChange])
+  useEffect(() => {
+    if (!showImmersiveMap) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [showImmersiveMap])
 
   return (
     <div className="space-y-4">
@@ -226,11 +251,11 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
 
       {/* Vista Lista / Mapa */}
       <div className="flex gap-2">
-        <button onClick={() => setView('lista')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
-        <button onClick={openMap} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
+        <button onClick={() => setView('lista')} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
+        <button onClick={openMap} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
       </div>
 
-      {view === 'mapa' && (
+      {view === 'mapa' && !showImmersiveMap && (
         <div className="space-y-3">
           {withCoords.length === 0 ? (
             <Empty text="Ninguna sesión tiene ubicación en el mapa todavía. Al crear una, toca «Usar mi ubicación» estando en el lugar." />
@@ -238,11 +263,99 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
             <>
               <LiveTrainingLayer trainers={liveTrainers} visible={showLive} onToggle={setShowLive} selfProfileId={profile.id} />
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                <div className="relative" style={{ height: 320 }}>
+                  <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                  <MapBottomSheet title="Sesiones en el mapa" count={withCoords.length}>
+                    <div className="space-y-2">
+                      {withCoords.map((s) => {
+                        const list = rsvps[s.id]
+                        const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
+                        return (
+                          <div key={s.id} className="rounded-xl bg-white p-2 shadow-sm">
+                            <p className="text-sm font-bold text-night">{sportEmoji(s.sport)} {s.title}</p>
+                            <p className="text-xs text-slate-500">{weekdayName(s.date)} {formatDate(s.date)} · {s.time} · {s.place}</p>
+                            <p className="text-xs font-semibold text-teal-dark">Cupo {confirmed}/{s.capacity} · {s.host_name}</p>
+                          </div>
+                        )
+                      })}
+                      <p className="pt-1 text-center text-[11px] text-slate-500">Toca un marcador en el mapa para ver deporte, fecha, hora, lugar y cupos.</p>
+                    </div>
+                  </MapBottomSheet>
+                </div>
               </Suspense>
               <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista. Las rutas para entrenar están en la pestaña Rutas.</p>
             </>
           )}
+        </div>
+      )}
+
+      {/* Mapa inmersivo (Fase 1): contenedor fixed a pantalla completa.
+          El mapa llena el área sobre la navegación + el dock de música
+          (que quedan visibles y funcionales). La hoja es hija flex
+          (modo dock): el mapa ocupa lo que queda arriba y la
+          atribución de MapLibre queda visible justo encima de la hoja,
+          nunca tapada. En escritorio la hoja es panel lateral. Se sale
+          con ← Lista; + Crear sale del mapa y abre el formulario. */}
+      {showImmersiveMap && (
+        <div className={`pulso-map-immersive ${gpsActive ? 'pulso-map-immersive-gps' : ''}`}>
+          <div className="relative min-h-0 flex-1">
+            <Suspense fallback={<div className="flex h-full items-center justify-center bg-[#EFEAE2] text-sm font-bold text-night">🗺️ Cargando mapa…</div>}>
+              <MapView
+                center={mapCenter}
+                markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]}
+                offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles."
+                immersive
+              />
+            </Suspense>
+            {/* Pastilla flotante: salir a la lista + crear sesión. */}
+            <div className="absolute left-2 z-20 flex items-center gap-2" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+              <button type="button" onClick={() => setView('lista')} className="pulso-press rounded-full bg-white/95 px-3 py-2 text-sm font-black text-night shadow-lg">← Lista</button>
+              <span className="rounded-full bg-night/85 px-3 py-2 text-xs font-bold text-white shadow-lg">🗺️ Mapa · {profile.zone}</span>
+              {!guest && (
+                <button type="button" onClick={() => { setView('lista'); setShowForm(true) }} className="pulso-press rounded-full bg-pulso px-3 py-2 text-sm font-black text-night shadow-lg">+ Crear</button>
+              )}
+            </div>
+          </div>
+          <MapBottomSheet
+            dock
+            title="Sesiones en el mapa"
+            count={withCoords.length}
+            collapsedTitle={`Sesiones (${withCoords.length})`}
+            state={sheetState}
+            onStateChange={setSheetState}
+            header={(
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowLive(!showLive)}
+                    aria-pressed={showLive}
+                    className={`pulso-press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${showLive ? 'bg-pulso text-night' : 'bg-white text-slate-600'}`}
+                  >
+                    {showLive ? '🔴' : '⚪'} Entrenando ahora{liveTrainers.length > 0 ? ` (${liveTrainers.length})` : ''}
+                  </button>
+                  {showLive && liveTrainers.length === 0 && (
+                    <span className="text-xs text-slate-500">Nadie entrena ahora mismo.</span>
+                  )}
+                </div>
+              </div>
+            )}
+          >
+            <div className="space-y-2">
+              {withCoords.map((s) => {
+                const list = rsvps[s.id]
+                const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
+                return (
+                  <div key={s.id} className="rounded-xl bg-white p-2 shadow-sm">
+                    <p className="text-sm font-bold text-night">{sportEmoji(s.sport)} {s.title}</p>
+                    <p className="text-xs text-slate-500">{weekdayName(s.date)} {formatDate(s.date)} · {s.time} · {s.place}</p>
+                    <p className="text-xs font-semibold text-teal-dark">Cupo {confirmed}/{s.capacity} · {s.host_name}</p>
+                  </div>
+                )
+              })}
+              <p className="pt-1 text-center text-[11px] text-slate-500">Toca un marcador en el mapa para ver deporte, fecha, hora, lugar y cupos.</p>
+            </div>
+          </MapBottomSheet>
         </div>
       )}
 

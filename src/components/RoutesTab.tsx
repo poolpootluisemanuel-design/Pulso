@@ -79,10 +79,8 @@ export default function RoutesTab({ profile, onRunRoute }: { profile: Profile; o
   const youMarker: MapMarker[] = gpsCenter ? [
     { key: 'yo', lat: gpsCenter.lat, lng: gpsCenter.lng, emoji: '🧍', color: '#0A1B2E', popupHtml: '<b>Estás aquí</b>' },
   ] : []
-  // En Isla Mujeres el mapa oscuro es casi todo mar gris: allí el
-  // mapa arranca en satélite (se ve la isla real). El usuario puede
-  // cambiarlo con el selector y su elección se guarda.
-  const defaultBasemap = profile.zone === 'Isla Mujeres' ? 'satellite' as const : 'dark' as const
+  // El mapa abre en el deportivo (MapView: 'sport' por defecto, con
+  // satélite de respaldo si falla); la elección se guarda.
 
   return (
     <div className="space-y-4">
@@ -95,7 +93,6 @@ export default function RoutesTab({ profile, onRunRoute }: { profile: Profile; o
         <MapView
           center={selectedRoute.points[0]}
           guidePoints={selectedRoute.points}
-          defaultBasemap={defaultBasemap}
           markers={[
             { key: 'r-inicio', lat: selectedRoute.points[0].lat, lng: selectedRoute.points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
             { key: 'r-fin', lat: selectedRoute.points[selectedRoute.points.length - 1].lat, lng: selectedRoute.points[selectedRoute.points.length - 1].lng, emoji: '🏁', color: '#E63946', popupHtml: '<b>Fin</b>' },

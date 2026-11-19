@@ -30,6 +30,12 @@ export default function RecommendedRoutes({
   userPosition,
   onRequestLocation,
   locState = 'idle',
+  // Compacto (hoja inmersiva expandida): una línea por ruta (nombre,
+  // distancia ~km, chip de dificultad, y "A X.X km del inicio" si hay
+  // ubicación), sin los textos largos ni las etiquetas. Los chips de
+  // filtro y el botón de ubicación se conservan; la fila seleccionada
+  // sigue mostrando "▶ Recorrer esta ruta con GPS".
+  compact = false,
 }: {
   selectedId: string | null
   onSelect: (route: RecommendedRoute) => void
@@ -40,6 +46,7 @@ export default function RecommendedRoutes({
   /** Pide la ubicación actual (botón "Mostrar las más cercanas a mí"). */
   onRequestLocation?: () => void
   locState?: RouteLocState
+  compact?: boolean
 }) {
   const [filter, setFilter] = useState<Filter>('cerca')
   const byZone = userZone ? routesSortedByZone(userZone) : RECOMMENDED_ROUTES
@@ -64,11 +71,15 @@ export default function RecommendedRoutes({
 
   return (
     <div className="space-y-2">
-      <p className="text-sm font-bold text-teal-dark">
-        🏃 Rutas recomendadas para correr
-        {userPosition && filter === 'cerca' ? ' · Ordenadas por distancia al inicio' : mine.length > 0 && filter === 'cerca' ? ` · Cerca de ti en ${userZone} (${mine.length})` : ''}
-      </p>
-      <p className="text-xs text-slate-500">Toca una ruta para verla en el mapa. Las distancias son aproximadas, calculadas del trazado. El marcador 🧍 en el mapa eres tú.</p>
+      {!compact && (
+        <>
+          <p className="text-sm font-bold text-teal-dark">
+            🏃 Rutas recomendadas para correr
+            {userPosition && filter === 'cerca' ? ' · Ordenadas por distancia al inicio' : mine.length > 0 && filter === 'cerca' ? ` · Cerca de ti en ${userZone} (${mine.length})` : ''}
+          </p>
+          <p className="text-xs text-slate-500">Toca una ruta para verla en el mapa. Las distancias son aproximadas, calculadas del trazado. El marcador 🧍 en el mapa eres tú.</p>
+        </>
+      )}
       {!userPosition && onRequestLocation && (
         <div className="space-y-1">
           <button
@@ -86,7 +97,7 @@ export default function RecommendedRoutes({
           )}
         </div>
       )}
-      {userPosition && (
+      {userPosition && !compact && (
         <p className="rounded-xl bg-teal/10 p-2 text-xs font-semibold text-teal-dark">🧍 Estás aquí: las rutas están ordenadas del inicio más cercano al más lejano. Toca una para ver en el mapa qué tan lejos te queda el inicio.</p>
       )}
       <div className="flex flex-wrap gap-1.5">
@@ -103,6 +114,25 @@ export default function RecommendedRoutes({
       {visible.map((r) => {
         const selected = selectedId === r.id
         const distKm = userPosition ? distanceToRouteStartKm(userPosition, r) : null
+        if (compact) {
+          return (
+            <div key={r.id}>
+              <button className="w-full text-left" onClick={() => onSelect(r)}>
+                <div className={`flex items-center gap-2 rounded-xl bg-white px-3 py-2.5 shadow-sm ${selected ? 'ring-2 ring-pulso' : ''}`}>
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-night">{r.name}</span>
+                  {distKm !== null && <span className="shrink-0 text-[11px] font-semibold text-teal-dark">🧍 {distKm.toFixed(1)} km</span>}
+                  <span className="shrink-0 text-[11px] font-semibold text-slate-500">~{routeDistanceKm(r).toFixed(1)} km</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${DIFFICULTY_COLOR[r.difficulty]}`}>{r.difficulty}</span>
+                </div>
+              </button>
+              {selected && (
+                <Btn variant="coral" className="mt-2 w-full" onClick={() => onRun(r)}>
+                  ▶ Recorrer esta ruta con GPS
+                </Btn>
+              )}
+            </div>
+          )
+        }
         return (
           <Card key={r.id} className={selected ? 'ring-2 ring-pulso' : ''}>
             <button className="w-full text-left" onClick={() => onSelect(r)}>

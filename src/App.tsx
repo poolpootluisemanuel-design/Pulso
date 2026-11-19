@@ -91,6 +91,12 @@ export default function App() {
   // Botón flotante "+ Crear" de Sesiones: cada toque suma 1 y
   // SessionsTab abre el formulario.
   const [createSignal, setCreateSignal] = useState(0)
+  // Mapa inmersivo de Sesiones: SessionsTab avisa cuando la vista de
+  // mapa a pantalla completa está abierta, para esconder el FAB "+"
+  // (el contenedor inmersivo lo taparía; crear se hace desde su
+  // pastilla flotante). El encabezado y la navegación no se tocan: el
+  // contenedor inmersivo es fixed y los tapa solo mientras está abierto.
+  const [mapImmersive, setMapImmersive] = useState(false)
   // Menú "Más" (5ª pestaña): qué vista muestra dentro de Más.
   // 'menu' es la lista (Buscar, Comunidad, Negocios, Música, Perfil,
   // Soy coach, Administración). Al salir de Más se vuelve al menú.
@@ -299,7 +305,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FFF9F0]">
+      <div className="flex min-h-dvh items-center justify-center bg-[#FFF9F0]">
         <div className="text-center">
           <Logo size={72} withWordmark />
           <p className="mt-3 text-lg font-black text-night">Cargando PULSO…</p>
@@ -313,7 +319,7 @@ export default function App() {
   // solo lectura GUEST_PROFILE); sin usuario y sin invitado, acceso.
   if (!profile) {
     return (
-      <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+      <div className="min-h-dvh bg-night-50 font-sans text-slate-800">
         {updateBanner}
         <Auth onDone={() => { setLoading(true); loadAll() }} onGuest={goGuest} initialView={authView} />
       </div>
@@ -321,7 +327,7 @@ export default function App() {
   }
   if (!user && !guest) {
     return (
-      <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+      <div className="min-h-dvh bg-night-50 font-sans text-slate-800">
         {updateBanner}
         <Auth onDone={() => { setLoading(true); loadAll() }} onGuest={goGuest} initialView={authView} />
       </div>
@@ -329,10 +335,15 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-night-50 font-sans text-slate-800">
+    <div className="min-h-dvh bg-night-50 font-sans text-slate-800">
       {/* Encabezado claro (paleta cálida 2026-11-18): logo PULSO, avatar.
           Sin campana: el punto rojo era falso (se prendía con cualquier
           publicación, no con algo nuevo para ti). */}
+      {/* Encabezado: se esconde mientras el mapa inmersivo está
+          abierto; en el teléfono se asomaba una franja del encabezado
+          por encima del mapa. La pastilla flotante del mapa (← Lista
+          + título + Crear) ya cubre esa navegación. */}
+      {!mapImmersive && (
       <header className="pulso-header sticky top-0 z-10 border-b border-[#F2DCC6] bg-[#FFF9F0]/95 px-4 pb-3 text-night shadow-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2">
@@ -359,6 +370,7 @@ export default function App() {
           </div>
         </div>
       </header>
+      )}
 
       {/* Aviso de modo invitado: visible en todas las pantallas,
           con el botón para crear cuenta siempre a la mano. */}
@@ -406,9 +418,9 @@ export default function App() {
       )}
 
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
-        {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
-        {tab === 'rutas' && <RoutesTab profile={profile} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
+        {tab === 'inicio' && <div className="pulso-tab-in"><Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} /></div>}
+        {tab === 'sesiones' && <div className="pulso-tab-in"><SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} gpsActive={activity.gps?.active === true} onMapImmersiveChange={setMapImmersive} /></div>}
+        {tab === 'rutas' && <div className="pulso-tab-in"><RoutesTab profile={profile} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} /></div>}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
@@ -439,15 +451,15 @@ export default function App() {
             </div>
           ) : null
         ) : (
-          <div className={tab === 'entrenar' ? '' : 'hidden'}>
+          <div className={`pulso-tab-in ${tab === 'entrenar' ? '' : 'hidden'}`}>
             <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
           </div>
         )}
-        {tab === 'retos' && <Challenges workouts={workouts} challenges={challenges} businesses={businesses} />}
+        {tab === 'retos' && <div className="pulso-tab-in"><Challenges workouts={workouts} challenges={challenges} businesses={businesses} /></div>}
         {/* Menú Más: Buscar, Comunidad, Negocios, Música, Perfil,
             Soy coach y Administración ya no son pestañas fijas. */}
         {tab === 'mas' && (
-          <>
+          <div className="pulso-tab-in">
             {moreView !== 'menu' && (
               <button onClick={() => setMoreView('menu')} className="mb-3 text-sm font-bold text-pulso-dark">← Más</button>
             )}
@@ -476,7 +488,7 @@ export default function App() {
             {moreView === 'admin' && admin && user && (
               <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
             )}
-          </>
+          </div>
         )}
       </main>
 
@@ -491,8 +503,11 @@ export default function App() {
           mini-barra (el contenido reserva el espacio de las dos con
           .pulso-main-gps) y la música sigue sonando. En Entrenar la
           música sigue abajo como siempre, porque el GPS ya se ve en
-          pantalla. */}
-      <div id="pulso-music" className="pulso-music-dock fixed left-0 right-0 z-20 mx-auto max-w-2xl px-3">
+          pantalla. Con el mapa inmersivo abierto el dock sube a z-40
+          (el mapa es z-30): la mini-barra queda donde siempre (debajo
+          del borde inferior del mapa) y la hoja expandida pinta por
+          encima del mapa; MusicPlayer nunca se desmonta. */}
+      <div id="pulso-music" className={`pulso-music-dock fixed left-0 right-0 ${mapImmersive ? 'z-40' : 'z-20'} mx-auto max-w-2xl px-3`}>
         {tab !== 'entrenar' && activity.gps?.active && (
           <button
             onClick={() => goTab('entrenar')}
@@ -510,6 +525,7 @@ export default function App() {
           compact={tab !== 'entrenar'}
           expanded={musicExpanded}
           onExpandedChange={setMusicExpanded}
+          immersive={mapImmersive}
           onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
           onGoTrain={() => goTab('entrenar')}
         />
@@ -520,9 +536,9 @@ export default function App() {
           etiqueta "Crear" y texto oscuro sobre rosa. Se esconde en
           Entrenar, cuando la hoja de música está expandida y en modo
           invitado (crear sesión necesita cuenta). */}
-      {tab === 'sesiones' && !musicExpanded && !guest && (
+      {tab === 'sesiones' && !musicExpanded && !guest && !mapImmersive && (
         <button onClick={() => setCreateSignal((n) => n + 1)} aria-label="Crear sesión"
-          className={`pulso-fab fixed right-4 z-20 flex h-14 items-center gap-1 rounded-full bg-pulso px-5 text-base font-black text-night shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
+          className={`pulso-fab pulso-press fixed right-4 z-20 flex h-14 items-center gap-1 rounded-full bg-pulso px-5 text-base font-black text-night shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
           <span className="text-2xl leading-none">+</span> Crear
         </button>
       )}
@@ -530,8 +546,8 @@ export default function App() {
       <nav className="pulso-nav fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex h-full max-w-2xl">
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => goTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
-              {/* Entrenar es la acción principal: círculo rosa para que
+            <button key={t.id} onClick={() => goTab(t.id)} className={`pulso-press flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
+              {/* Entrenar es la pestaña central: círculo rosa para que
                   se vea como el botón principal de la app. */}
               <span className={`flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none ${t.id === 'entrenar' ? 'bg-pulso text-night shadow-md shadow-pulso/40' : ''}`}>{t.icon}</span>
               {t.label}

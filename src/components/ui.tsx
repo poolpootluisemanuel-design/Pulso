@@ -36,7 +36,7 @@ export function Btn({
   }[variant]
   return (
     <button type={type} onClick={onClick} disabled={disabled}
-      className={`rounded-full px-4 py-3 font-bold disabled:opacity-50 ${styles} ${className}`}>
+      className={`pulso-press rounded-full px-4 py-3 font-bold disabled:opacity-50 ${styles} ${className}`}>
       {children}
     </button>
   )
