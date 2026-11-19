@@ -689,7 +689,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     setCustomErr('')
     update({ customUrl: customInput.trim(), customLabel: parsed.kind === 'playlist' ? 'Mi playlist de YouTube' : 'Mi video de YouTube' })
     if (ytMode !== 'extractor' || source !== 'youtube') {
-      setPlaying(true)
+      // En modo embed el video también entra a la cola (la playlist
+      // no: sus videos solo se conocen resolviéndola con el extractor).
+      if (parsed.kind === 'video') {
+        addYtTrack({ id: parsed.id, title: 'Mi video de YouTube', thumbnail: ytThumbnail(parsed.id) })
+      } else {
+        setPlaying(true)
+      }
       return
     }
     setYtResolving(true)
@@ -771,9 +777,20 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     setLocalPlaying(true)
   }
 
-  // Cola del extractor: sonar, agregar, borrar y mover (↑ ↓). La lista
-  // es la que suena y se guarda en el teléfono.
-  function playYtTrack(index: number) {
+  // Cola de YouTube: sonar una canción. En modo extractor va por el
+  // <audio> con la URL resuelta; en modo embed la canción se pone como
+  // video personalizado y el efecto de cue del iframe la carga y la
+  // reproduce. `trackOverride` es para agregar: la canción aún no está
+  // en `ytQueue` cuando se llama.
+  function playYtTrack(index: number, trackOverride?: ExtractorTrack) {
+    const track = trackOverride ?? ytQueue[index]
+    if (!track) return
+    if (ytMode !== 'extractor' || source !== 'youtube') {
+      if (index !== ytQueueIndex) setYtQueueIndex(index)
+      update({ customUrl: `https://www.youtube.com/watch?v=${track.id}`, customLabel: track.title })
+      setPlaying(true)
+      return
+    }
     if (ytQueue.length === 0) return
     if (index !== ytQueueIndex) {
       setYtQueueIndex(index)
@@ -786,9 +803,10 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   function addYtTrack(track: ExtractorTrack) {
     const at = ytQueue.findIndex((t) => t.id === track.id)
     if (at >= 0) { playYtTrack(at); return }
+    const index = ytQueue.length
     setYtQueue([...ytQueue, track])
-    setYtQueueIndex(ytQueue.length)
-    setPlaying(true)
+    setYtQueueIndex(index)
+    playYtTrack(index, track)
   }
 
   function removeYtTrack(index: number) {
@@ -803,6 +821,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     if (next[newIndex]?.id !== currentId) {
       setYtAudioUrl(null)
       ytResolvedForRef.current = null
+    }
+    // En modo embed la canción que suena es la del pref: si se borró
+    // la que sonaba, se pone en cola la que quedó como actual.
+    if (ytMode !== 'extractor' && source === 'youtube' && index === ytQueueIndex && next[newIndex]) {
+      const t = next[newIndex]
+      update({ customUrl: `https://www.youtube.com/watch?v=${t.id}`, customLabel: t.title })
+      setPlaying(true)
     }
   }
 
@@ -957,6 +982,30 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     </>
   )
 
+  // La cola se ve en AMBOS modos (extractor y embed): antes solo
+  // estaba en la rama del extractor y al caer al embed desaparecía
+  // por completo. Tocar una fila suena esa canción en el modo que
+  // esté activo (playYtTrack ramifica); ↑ ↓ ✕ y el guardado en el
+  // teléfono son los mismos en los dos modos.
+  const ytQueueList = ytQueue.length === 0 ? (
+    <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Tu lista está vacía. Agrega una canción con el link de abajo o toca un preset.</p>
+  ) : (
+    <div className="space-y-1">
+      {ytQueue.map((t, i) => (
+        <div key={t.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${i === ytQueueIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}>
+          <TrackThumb track={t} className="h-9 w-9" />
+          <button onClick={() => playYtTrack(i)} className="min-w-0 flex-1 truncate text-left">
+            {i === ytQueueIndex ? '▶ ' : ''}{t.title}
+          </button>
+          {t.durationSec ? <span className="shrink-0 text-xs text-slate-400">{fmtTime(t.durationSec)}</span> : null}
+          <button onClick={() => moveYtTrack(i, -1)} disabled={i === 0} aria-label="Subir en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↑</button>
+          <button onClick={() => moveYtTrack(i, 1)} disabled={i === ytQueue.length - 1} aria-label="Bajar en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↓</button>
+          <button onClick={() => removeYtTrack(i)} aria-label="Quitar de la lista" className="shrink-0 px-1 text-base">✕</button>
+        </div>
+      ))}
+    </div>
+  )
+
   // Una sola raíz y el div de YouTube siempre como primer hijo: al
   // pasar de mini-barra a hoja (y al revés) React conserva el mismo
   // nodo DOM y el reproductor NO se recarga ni se corta.
@@ -1004,7 +1053,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               </button>
             </>
           )}
-          {ytExtractorActive && ytQueue.length > 1 && (
+          {source === 'youtube' && ytQueue.length > 1 && (
             <>
               <button
                 onClick={() => playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)}
@@ -1080,7 +1129,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                     Suena por el extractor: audio directo en segundo plano, con la pantalla apagada. Tu lista se guarda en este teléfono.
                   </p>
                   {ytResolving && <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Resolviendo audio…</p>}
-                  {ytCurrent ? (
+                  {ytCurrent && (
                     <div className="space-y-2 rounded-xl bg-sage-100 p-3">
                       <div className="flex items-center gap-3">
                         <TrackThumb track={ytCurrent} className="h-14 w-14" />
@@ -1100,26 +1149,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                         <Btn variant="ghost" className="flex-1" onClick={() => playYtTrack((ytQueueIndex + 1) % ytQueue.length)} disabled={ytQueue.length < 2}>Siguiente ⏭</Btn>
                       </div>
                     </div>
-                  ) : (
-                    <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Tu lista está vacía. Agrega una canción con el link de abajo o toca un preset.</p>
                   )}
 
-                  {ytQueue.length > 0 && (
-                    <div className="space-y-1">
-                      {ytQueue.map((t, i) => (
-                        <div key={t.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${i === ytQueueIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}>
-                          <TrackThumb track={t} className="h-9 w-9" />
-                          <button onClick={() => playYtTrack(i)} className="min-w-0 flex-1 truncate text-left">
-                            {i === ytQueueIndex ? '▶ ' : ''}{t.title}
-                          </button>
-                          {t.durationSec ? <span className="shrink-0 text-xs text-slate-400">{fmtTime(t.durationSec)}</span> : null}
-                          <button onClick={() => moveYtTrack(i, -1)} disabled={i === 0} aria-label="Subir en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↑</button>
-                          <button onClick={() => moveYtTrack(i, 1)} disabled={i === ytQueue.length - 1} aria-label="Bajar en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↓</button>
-                          <button onClick={() => removeYtTrack(i)} aria-label="Quitar de la lista" className="shrink-0 px-1 text-base">✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {ytQueueList}
 
                   {presetButtons}
                   <div className="flex items-center gap-2">
@@ -1137,6 +1169,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                       <button className="font-bold underline" onClick={retryExtractor}>Probar de nuevo</button>
                     </p>
                   )}
+                  {ytQueueList}
                   {presetButtons}
 
                   {/* El video ya está arriba como primer hijo de la raíz
