@@ -24,6 +24,63 @@ export default function Home({ profile, sessions, workouts, onGoSessions, onGoTr
   const todayIdx = (new Date().getDay() + 6) % 7
   const trainedDays = new Set(workouts.map((w) => (new Date(w.date + 'T12:00:00').getDay() + 6) % 7))
 
+  // Esta semana, estilo Strava: distancia y duración de la semana
+  // (lunes a domingo), km por semana de las últimas 12, serie de
+  // semanas seguidas y mejores marcas. Todo se calcula con los
+  // entrenamientos guardados (GPS y manuales). El mejor 5 km se
+  // estima con el mejor ritmo (5 × ritmo) de carreras de 5 km o
+  // más; el desnivel no se muestra porque PULSO no guarda altura.
+  const mondayOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); x.setHours(12, 0, 0, 0); return x }
+  const toISODate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const mondayISO = (dateStr: string) => toISODate(mondayOf(new Date(dateStr + 'T12:00:00')))
+  const thisMonday = mondayOf(new Date())
+  const thisMondayISO = toISODate(thisMonday)
+  const weekWorkouts = workouts.filter((w) => mondayISO(w.date) === thisMondayISO)
+  const weekKm = weekWorkouts.reduce((s, w) => s + (w.distance_km ?? 0), 0)
+  const weekMin = weekWorkouts.reduce((s, w) => s + (w.duration_min || 0), 0)
+  const last12Mondays = Array.from({ length: 12 }, (_, i) => { const m = new Date(thisMonday); m.setDate(m.getDate() - (11 - i) * 7); return m })
+  const weekKmByWeek = last12Mondays.map((m) => {
+    const iso = toISODate(m)
+    return workouts.filter((w) => mondayISO(w.date) === iso).reduce((s, w) => s + (w.distance_km ?? 0), 0)
+  })
+  const weekHasWorkout = last12Mondays.map((m) => {
+    const iso = toISODate(m)
+    return workouts.some((w) => mondayISO(w.date) === iso)
+  })
+  // Serie: semanas seguidas con al menos un entrenamiento. Si esta
+  // semana aún no entrena, se mide hasta la semana pasada.
+  let streakWeeks = 0
+  {
+    let j = weekHasWorkout[11] ? 11 : 10
+    while (j >= 0 && weekHasWorkout[j]) { streakWeeks++; j-- }
+  }
+  const isRun = (s: string) => ['correr', 'running', 'run'].includes(s.toLowerCase())
+  const isBike = (s: string) => ['ciclismo', 'cycling', 'bici'].includes(s.toLowerCase())
+  const paces = (pred: (s: string) => boolean, minKm: number) => workouts
+    .filter((w) => (w.distance_km ?? 0) >= minKm && pred(w.sport))
+    .map((w) => (w.duration_min || 0) / (w.distance_km || 1))
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b)
+  const runPaces = paces(isRun, 5)
+  const bikePaces = paces(isBike, 5)
+  const fmtPace = (p: number) => { const m = Math.floor(p); const s = Math.round((p - m) * 60); return `${m}:${String(s).padStart(2, '0')}` }
+  const fmt5k = (p: number) => { const t = Math.round(p * 5 * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` }
+  const fmtKm = (km: number) => { const r = Math.round(km * 10) / 10; return `${r % 1 === 0 ? r : r.toFixed(1)} km` }
+  const fmtDur = (min: number) => {
+    const m = Math.round(min)
+    if (m < 60) return `${m} min`
+    const h = Math.floor(m / 60); const rest = m % 60
+    return rest === 0 ? `${h} h` : `${h} h ${rest} min`
+  }
+  const bestMarks: { label: string; value: string }[] = []
+  if (runPaces[0]) bestMarks.push({ label: 'Mejor 5 km', value: fmt5k(runPaces[0]) })
+  if (runPaces[1]) bestMarks.push({ label: 'Segundo 5 km', value: fmt5k(runPaces[1]) })
+  if (runPaces[0]) bestMarks.push({ label: 'Mejor ritmo corriendo', value: `${fmtPace(runPaces[0])} min/km` })
+  if (bikePaces[0]) bestMarks.push({ label: 'Mejor ritmo en bici', value: `${fmtPace(bikePaces[0])} min/km` })
+  const maxWeekKm = Math.max(...weekKmByWeek, 1)
+  const chartPts = weekKmByWeek.map((km, i) => `${20 + (i * 360) / 11},${110 - (km / maxWeekKm) * 90}`).join(' ')
+  const monthShort = (d: Date) => d.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '').toUpperCase()
+
   return (
     <div className="space-y-4">
       {/* Saludo con avatar, como la app de Muse */}
@@ -99,6 +156,59 @@ export default function Home({ profile, sessions, workouts, onGoSessions, onGoTr
             </div>
           ))}
         </div>
+      </Card>
+
+      {/* Esta semana (estilo Strava): distancia y duración, gráfica
+          de km de las últimas 12 semanas y mejores marcas. */}
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="font-black text-night">Esta semana</p>
+          <span className="rounded-full bg-teal/15 px-2.5 py-1 text-xs font-bold text-teal-dark">Serie · {streakWeeks} {streakWeeks === 1 ? 'semana' : 'semanas'}</span>
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Distancia</p>
+            <p className="text-2xl font-black text-night">{fmtKm(weekKm)}</p>
+          </div>
+          <div className="flex-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Duración</p>
+            <p className="text-2xl font-black text-night">{fmtDur(weekMin)}</p>
+          </div>
+        </div>
+        {weekKmByWeek.some((v) => v > 0) ? (
+          <>
+            <p className="mb-1 mt-4 text-xs font-bold uppercase tracking-wider text-slate-500">Últimas 12 semanas · km por semana</p>
+            <svg viewBox="0 0 400 130" className="h-auto w-full" role="img" aria-label="Kilómetros por semana, últimas 12 semanas">
+              <line x1="20" y1="20" x2="20" y2="110" stroke="#e2e8f0" strokeWidth="1" />
+              <line x1="20" y1="110" x2="380" y2="110" stroke="#e2e8f0" strokeWidth="1" />
+              <text x="2" y="24" fontSize="9" fill="#64748b">{fmtKm(maxWeekKm).replace(' km', '')}</text>
+              <text x="2" y="68" fontSize="9" fill="#64748b">{fmtKm(maxWeekKm / 2).replace(' km', '')}</text>
+              <text x="6" y="112" fontSize="9" fill="#64748b">0</text>
+              <polygon points={`${chartPts} 380,110 20,110`} fill="#F2A7B8" opacity="0.25" />
+              <polyline points={chartPts} fill="none" stroke="#D14D72" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              <circle cx="380" cy={110 - (weekKmByWeek[11] / maxWeekKm) * 90} r="4" fill="#D14D72" />
+              <text x="20" y="126" fontSize="9" fill="#64748b">{monthShort(last12Mondays[0])}</text>
+              <text x="190" y="126" fontSize="9" fill="#64748b">{monthShort(last12Mondays[6])}</text>
+              <text x="360" y="126" fontSize="9" fill="#64748b">{monthShort(last12Mondays[11])}</text>
+            </svg>
+          </>
+        ) : (
+          <p className="mt-4 rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Aún no hay kilómetros registrados en las últimas 12 semanas.</p>
+        )}
+        <p className="mb-2 mt-4 font-black text-night">Mejores tiempos</p>
+        {bestMarks.length === 0 ? (
+          <p className="text-sm text-slate-600">Sin marcas todavía: graba un entrenamiento con GPS para ver tu mejor ritmo y tu mejor 5 km.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {bestMarks.map((m) => (
+              <div key={m.label} className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">{m.label}</span>
+                <span className="font-black text-night">{m.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="mt-3 text-xs text-slate-500">El mejor 5 km se estima con tu mejor ritmo (5 × ritmo). El desnivel no se muestra: PULSO no guarda altura del GPS.</p>
       </Card>
 
       {/* Próximas sesiones */}
