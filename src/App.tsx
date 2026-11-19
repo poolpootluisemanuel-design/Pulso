@@ -500,8 +500,11 @@ export default function App() {
           mini-barra (el contenido reserva el espacio de las dos con
           .pulso-main-gps) y la música sigue sonando. En Entrenar la
           música sigue abajo como siempre, porque el GPS ya se ve en
-          pantalla. */}
-      <div id="pulso-music" className="pulso-music-dock fixed left-0 right-0 z-20 mx-auto max-w-2xl px-3">
+          pantalla. Con el mapa inmersivo abierto el dock sube a z-40
+          (el mapa es z-30): la mini-barra queda donde siempre (debajo
+          del borde inferior del mapa) y la hoja expandida pinta por
+          encima del mapa; MusicPlayer nunca se desmonta. */}
+      <div id="pulso-music" className={`pulso-music-dock fixed left-0 right-0 ${mapImmersive ? 'z-40' : 'z-20'} mx-auto max-w-2xl px-3`}>
         {tab !== 'entrenar' && activity.gps?.active && (
           <button
             onClick={() => goTab('entrenar')}
@@ -519,6 +522,7 @@ export default function App() {
           compact={tab !== 'entrenar'}
           expanded={musicExpanded}
           onExpandedChange={setMusicExpanded}
+          immersive={mapImmersive}
           onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
           onGoTrain={() => goTab('entrenar')}
         />

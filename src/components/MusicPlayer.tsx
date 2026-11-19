@@ -138,7 +138,7 @@ type YTPlayer = {
   destroy: () => void
 }
 
-export default function MusicPlayer({ profileId, compact, expanded, onExpandedChange, onPlayingChange, onGoTrain }: {
+export default function MusicPlayer({ profileId, compact, expanded, onExpandedChange, onPlayingChange, onGoTrain, immersive }: {
   profileId: string
   compact?: boolean
   // Controlado desde App: la música empieza recogida en mini-barra en
@@ -147,6 +147,11 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   onExpandedChange?: (v: boolean) => void
   onPlayingChange?: (m: MusicStatus) => void
   onGoTrain?: () => void
+  /** Mapa inmersivo abierto: la ▲ abre la hoja del reproductor SOBRE
+   *  el mapa (no se sale a Entrenar). MusicPlayer nunca se desmonta:
+   *  solo cambia dónde se abre la hoja; el dock sube a z-40 en App
+   *  para que la hoja pinte por encima del mapa inmersivo (z-30). */
+  immersive?: boolean
 }) {
   const [pref, setPref] = useState(() => getMusicPref(profileId))
   const [playing, setPlaying] = useState(false)
@@ -651,7 +656,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             </>
           )}
           <button
-            onClick={() => { if (!compact) onExpandedChange?.(true); else onGoTrain?.() }}
+            onClick={() => { if (immersive || !compact) onExpandedChange?.(true); else onGoTrain?.() }}
             className="shrink-0 rounded-full bg-white/10 px-2.5 py-2 text-xs font-bold"
             aria-label="Expandir reproductor"
           >
@@ -659,7 +664,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           </button>
           {/* Sin botón "Entrenar →" en la mini-barra: la ▲ ya lleva a
               Entrenar en las demás pestañas, y ese botón robaba el
-              espacio del título, que se cortaba como "Músic…". */}
+              espacio del título, que se cortaba como "Músic…". En el
+              mapa inmersivo la ▲ abre la hoja sobre el mapa (no se
+              sale de Sesiones). */}
         </>
       ) : (
         <div className="mt-2">

@@ -525,6 +525,15 @@ export default function MapView({
     if (!is3d) setIs3d(true)
     map.easeTo({ bearing: map.getBearing() + delta, pitch: 55, duration: 400 })
   }
+  // Volver al norte: doble toque en "⟳ Girar" endereza el mapa
+  // (bearing 0, sin tocar la inclinación). El doble toque también
+  // dispara dos clics (dos giros de 45°), pero el reseteo llega
+  // después y el mapa termina en norte.
+  function resetNorth() {
+    const map = mapRef.current
+    if (!map) return
+    map.easeTo({ bearing: 0, duration: 400 })
+  }
   function zoomBy(delta: number) {
     const map = mapRef.current
     if (!map) return
@@ -591,43 +600,58 @@ export default function MapView({
             {fallbackNotice} ✕
           </button>
         )}
-        {/* Fondo del mapa: Deportivo (principal), Oscuro o Satélite. */}
-        <div className="pulso-map-controls-top absolute left-2 top-2 z-10 flex gap-1.5">
-          <button type="button" onClick={() => switchBasemap('sport')} aria-label="Mapa deportivo"
-            className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'sport' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
-            🏃 Deportivo
-          </button>
-          <button type="button" onClick={() => switchBasemap('dark')} aria-label="Mapa oscuro"
-            className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'dark' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
-            🌙 Oscuro
-          </button>
-          <button type="button" onClick={() => switchBasemap('satellite')} aria-label="Mapa satélite"
-            className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'satellite' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
-            🛰️ Satélite
-          </button>
+        {/* Fondo del mapa: Deportivo (principal), Oscuro o Satélite.
+            La ayuda va en pastilla flotante DEBAJO de los fondos:
+            antes estaba abajo a la izquierda, donde la hoja inferior
+            la tapaba al expandirse. Arriba siempre queda visible y no
+            tapa el mapa ni los controles. En inmersivo toda la columna
+            baja con .pulso-map-controls-top, por debajo de la pastilla
+            flotante de Sesiones. */}
+        <div className="pulso-map-controls-top absolute left-2 top-2 z-10 flex flex-col gap-1.5">
+          <div className="flex gap-1.5">
+            <button type="button" onClick={() => switchBasemap('sport')} aria-label="Mapa deportivo"
+              className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'sport' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
+              🏃 Deportivo
+            </button>
+            <button type="button" onClick={() => switchBasemap('dark')} aria-label="Mapa oscuro"
+              className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'dark' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
+              🌙 Oscuro
+            </button>
+            <button type="button" onClick={() => switchBasemap('satellite')} aria-label="Mapa satélite"
+              className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'satellite' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
+              🛰️ Satélite
+            </button>
+          </div>
+          <p className="pointer-events-none self-start rounded-full bg-night/80 px-2.5 py-1 text-[10px] font-bold text-white/80">
+            {is3d ? 'Vista 3D · gira con dos dedos' : 'Toca 3D para inclinar el mapa'}
+          </p>
         </div>
-        {/* Controles flotantes: zoom, ubicación, 2D/3D y girar. */}
-        <div className="pulso-map-controls-top absolute right-2 top-2 z-10 flex flex-col gap-1.5">
+        {/* Controles flotantes en UN solo grupo: zoom, ubicación, 2D/3D
+            y girar. Antes eran 6 botones sueltos y pegados; ahora van
+            en una tarjeta con divisores, sin superposiciones y con
+            tamaño táctil (44 px de alto). La rotación es un solo botón:
+            tocar gira 45° y el doble toque vuelve al norte. La
+            atribución de MapLibre queda abajo a la derecha, dentro del
+            contenedor del mapa: la hoja inferior es hermana flex bajo
+            el mapa, así que nunca la tapa en ningún estado. */}
+        <div className="pulso-map-controls-top absolute right-2 top-2 z-10 flex flex-col divide-y divide-slate-200 overflow-hidden rounded-2xl bg-white/95 shadow-lg">
           <button type="button" onClick={() => zoomBy(1)} aria-label="Acercar el mapa"
-            className="rounded-full bg-white/95 px-3 py-1.5 text-base font-black text-night shadow-lg">+</button>
+            className="flex h-11 w-28 items-center justify-center text-lg font-black text-night">+</button>
           <button type="button" onClick={() => zoomBy(-1)} aria-label="Alejar el mapa"
-            className="rounded-full bg-white/95 px-3 py-1.5 text-base font-black text-night shadow-lg">−</button>
+            className="flex h-11 w-28 items-center justify-center text-lg font-black text-night">−</button>
           {points !== undefined && (
             <button type="button" onClick={locateMe} disabled={!points || points.length === 0} aria-label="Centrar en mi ubicación"
-              className="rounded-full bg-white/95 px-3 py-1.5 text-xs font-black text-night shadow-lg disabled:opacity-40">◎ Ubicación</button>
+              className="flex h-11 w-28 items-center justify-center gap-1 text-xs font-black text-night disabled:opacity-40">◎ Ubicación</button>
           )}
           <button type="button" onClick={toggle3d} aria-label="Cambiar vista 2D o 3D"
-            className={`rounded-full px-3 py-1.5 text-xs font-black shadow-lg ${is3d ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
+            className={`flex h-11 w-28 items-center justify-center text-xs font-black ${is3d ? 'bg-pulso text-night' : 'text-night'}`}>
             {is3d ? '3D ✓' : '2D'}
           </button>
-          <button type="button" onClick={() => rotate(-45)} aria-label="Girar el mapa a la izquierda"
-            className="rounded-full bg-white/95 px-3 py-1.5 text-xs font-black text-night shadow-lg">⟲ Girar</button>
-          <button type="button" onClick={() => rotate(45)} aria-label="Girar el mapa a la derecha"
-            className="rounded-full bg-white/95 px-3 py-1.5 text-xs font-black text-night shadow-lg">Girar ⟳</button>
+          <button type="button" onClick={() => rotate(45)} onDoubleClick={resetNorth}
+            title="Tocar: girar 45° · Doble toque: volver al norte"
+            aria-label="Girar el mapa (doble toque para volver al norte)"
+            className="flex h-11 w-28 items-center justify-center gap-1 text-xs font-black text-night">⟳ Girar</button>
         </div>
-        <p className="pointer-events-none absolute bottom-2 left-2 z-10 rounded-full bg-night/80 px-2.5 py-1 text-[10px] font-bold text-white/80">
-          {is3d ? 'Vista 3D · gira con dos dedos' : 'Toca 3D para inclinar el mapa'}
-        </p>
         {/* Seguimiento soltado al arrastrar: botón para volver a
             centrarte en tu posición en vivo. */}
         {follow && points && points.length > 0 && !following && (

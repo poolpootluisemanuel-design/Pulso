@@ -13,6 +13,7 @@ const MapView = lazy(() => import('./MapView'))
 import type { MapMarker } from './MapView'
 import RecommendedRoutes from './RecommendedRoutes'
 import MapBottomSheet from './MapBottomSheet'
+import type { SheetState } from './MapBottomSheet'
 import { RECOMMENDED_ROUTES, routesSortedByZone, zoneCenter } from '../lib/routes'
 import type { RecommendedRoute } from '../lib/routes'
 import { isNative } from '../lib/native'
@@ -65,6 +66,10 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
   const [view, setView] = useState<'lista' | 'mapa'>('lista')
   // Dentro del mapa: sesiones con ubicación o rutas recomendadas.
   const [mapMode, setMapMode] = useState<'sesiones' | 'rutas'>('sesiones')
+  // Estado de la hoja inferior inmersiva (contraída / media /
+  // expandida): vive aquí para que al expandir las rutas se pongan en
+  // tarjetas compactas. Empieza en media, como antes.
+  const [sheetState, setSheetState] = useState<SheetState>('medium')
   // Suscripción al mapa en vivo: solo en vista mapa + modo sesiones.
   useEffect(() => {
     if (view !== 'mapa' || mapMode !== 'sesiones') return
@@ -406,6 +411,9 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
             dock
             title="Sesiones en el mapa"
             count={withCoords.length}
+            collapsedTitle={mapMode === 'rutas' ? `Rutas (${RECOMMENDED_ROUTES.length})` : `Sesiones (${withCoords.length})`}
+            state={sheetState}
+            onStateChange={setSheetState}
             header={(
               <div className="space-y-2">
                 <div className="flex gap-2">
@@ -454,6 +462,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
                 userPosition={gpsCenter}
                 onRequestLocation={requestUserPosition}
                 locState={locState}
+                compact={sheetState === 'expanded'}
               />
             )}
           </MapBottomSheet>
