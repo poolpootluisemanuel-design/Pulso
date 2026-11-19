@@ -46,7 +46,8 @@ import {
   type DeviceSong,
 } from '../lib/deviceMusic'
 import { Btn, Field, inputCls } from './ui'
-import { startAudioService, stopAudioService } from '../lib/audioService'
+import { startAudioService, stopAudioService, updateMedia, addMediaControlListener } from '../lib/audioService'
+import type { MediaControlAction } from '../lib/audioService'
 import { listPlaylist, resolveVideo, ytThumbnail, type ExtractorTrack } from '../lib/youtubeExtractor'
 import { openExternalUrl } from '../lib/openExternal'
 
@@ -307,6 +308,10 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const localPlayingRef = useRef(false)
   useEffect(() => { playingRef.current = playing }, [playing])
   useEffect(() => { localPlayingRef.current = localPlaying }, [localPlaying])
+  // Reintentos al pausarse el <audio> por fuera (pantalla apagada,
+  // foco de audio): como mucho 3 seguidos; al sonar se resetea. Sin
+  // tope, un sistema que pausa en bucle reintentaría sin parar.
+  const audioResumeTriesRef = useRef(0)
   // Qué video/playlist ya está cargado en el reproductor: el cue solo
   // se hace cuando cambia, nunca al volver de otra pestaña o de local.
   const lastCuedRef = useRef<string | null>(null)
@@ -394,6 +399,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             const st = window.YT?.PlayerState
             if (!st) return
             ytStateRef.current = e.data
+            // El iframe sigue montado y cargado aunque en modo
+            // extractor esté oculto y nunca suene: sus cambios de
+            // estado NO deben tocar `playing`, porque apagan el
+            // servicio en primer plano y matan el stream del
+            // extractor (pantalla apagada, build 37). Solo en modo
+            // embed el iframe es la fuente que suena.
+            if (sourceRef.current !== 'youtube' || ytModeRef.current !== 'embed') return
             // BUFFERING (3): no tocar `playing`, el video sigue en el
             // mismo punto y solo está cargando. CUED (5) y UNSTARTED
             // (-1): el video está parado en 0, así que el botón debe
@@ -404,6 +416,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             else if (e.data === st.PAUSED || e.data === st.ENDED || e.data === st.CUED || e.data === -1) setPlaying(false)
           },
           onError: (e: { data: number }) => {
+            // En modo extractor el iframe no suena: su error no es
+            // error del audio y no debe parar nada.
+            if (sourceRef.current !== 'youtube' || ytModeRef.current !== 'embed') return
             setPlaying(false)
             setYtError(e.data === 101 || e.data === 150
               ? 'Este video no permite verse incrustado. Ábrelo en YouTube con el botón de abajo.'
@@ -511,6 +526,45 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     return () => { void stopAudioService() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyPlaying, statusTitle])
+
+  // Sesión de medios NATIVA (pantalla de bloqueo / ajustes rápidos):
+  // título, artista y estado del audio y del servicio. Sin esto el
+  // teléfono no muestra controles (build 37). Se manda también en
+  // pausa para que la tarjeta de medios ofrezca reanudar.
+  useEffect(() => {
+    void updateMedia(statusTitle, source === 'local' ? 'PULSO · Música local' : 'PULSO', anyPlaying)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusTitle, anyPlaying, source])
+
+  // Botones de la notificación de medios (bloqueo): play/pausa/
+  // anterior/siguiente llegan desde el plugin nativo.
+  const mediaActionRef = useRef<(action: MediaControlAction) => void>(() => undefined)
+  useEffect(() => {
+    mediaActionRef.current = (action: MediaControlAction) => {
+      if (action === 'play') {
+        if (sourceRef.current === 'local') setLocalPlaying(true)
+        else setPlaying(true)
+      } else if (action === 'pause') {
+        setLocalPlaying(false)
+        setPlaying(false)
+      } else if (action === 'next') {
+        if (sourceRef.current === 'local' && localTracks.length > 1) playLocal((localIndex + 1) % localTracks.length)
+        else if (ytExtractorActive && ytQueue.length > 1) playYtTrack((ytQueueIndex + 1) % ytQueue.length)
+      } else if (action === 'previous') {
+        if (sourceRef.current === 'local' && localTracks.length > 1) playLocal((localIndex - 1 + localTracks.length) % localTracks.length)
+        else if (ytExtractorActive && ytQueue.length > 1) playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)
+      }
+    }
+  })
+  useEffect(() => {
+    let handle: { remove: () => Promise<void> } | null = null
+    let cancelled = false
+    void addMediaControlListener((action) => { mediaActionRef.current(action) }).then((h) => {
+      if (cancelled) { void h?.remove(); return }
+      handle = h
+    })
+    return () => { cancelled = true; void handle?.remove() }
+  }, [])
 
   // Media Session (YouTube, modo embed).
   useEffect(() => {
@@ -1330,8 +1384,44 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           if (sourceRef.current === 'local' && localPlayingRef.current) void audio.play().catch(() => undefined)
           else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor' && playingRef.current) void audio.play().catch(() => undefined)
         }}
-        onPlay={() => { if (sourceRef.current === 'local') setLocalPlaying(true) }}
-        onPause={() => { if (sourceRef.current === 'local') setLocalPlaying(false) }}
+        onPlay={() => {
+          audioResumeTriesRef.current = 0
+          if (sourceRef.current === 'local') setLocalPlaying(true)
+          else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') setPlaying(true)
+        }}
+        onPause={() => {
+          const audio = audioRef.current
+          if (!audio) return
+          // La canción terminó: onEnded ya avanza la cola o, si no
+          // hay siguiente, se espera un instante para no apagar la
+          // siguiente antes de que cargue.
+          if (audio.ended) {
+            window.setTimeout(() => {
+              const a = audioRef.current
+              if (a && a.ended && a.paused) {
+                if (sourceRef.current === 'local') setLocalPlaying(false)
+                else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') setPlaying(false)
+              }
+            }, 150)
+            return
+          }
+          // Pausa EXTERNA (el sistema apagó la pantalla o quitó el
+          // foco): la intención sigue siendo sonar, así que se
+          // reintenta. La pausa del usuario no llega aquí con la
+          // intención en true: togglePlay ya la puso en false antes
+          // de pausar el elemento.
+          if (sourceRef.current === 'local') {
+            if (localPlayingRef.current && audioResumeTriesRef.current < 3) {
+              audioResumeTriesRef.current += 1
+              window.setTimeout(() => { void audioRef.current?.play().catch(() => setLocalPlaying(false)) }, 400)
+            } else setLocalPlaying(false)
+          } else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') {
+            if (playingRef.current && audioResumeTriesRef.current < 3) {
+              audioResumeTriesRef.current += 1
+              window.setTimeout(() => { void audioRef.current?.play().catch(() => setPlaying(false)) }, 400)
+            } else setPlaying(false)
+          }
+        }}
         onEnded={() => {
           if (ytExtractorActive && ytQueue.length > 1) {
             setYtQueueIndex((i) => (i + 1) % ytQueue.length)
