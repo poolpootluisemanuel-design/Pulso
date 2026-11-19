@@ -544,18 +544,36 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // a play(): antes su rechazo ponía localPlaying=false aunque el
   // usuario había dado a Reproducir, y el botón quedaba desfasado. En
   // ese caso arranca solo al dispararse onCanPlay.
+  // SOLO UNA FUENTE SUENA A LA VEZ (bug 2026-11-19): este efecto NO
+  // debe salir antes de pausar cuando source !== 'local'. Antes el
+  // `if (source !== 'local') return` hacía que al cambiar a YouTube el
+  // <audio> local siguiera sonando con localPlaying=false: la
+  // mini-barra mostraba "En pausa · YouTube" mientras sonaba la música
+  // local, y al darle play a YouTube sonaban las dos juntas. Ahora
+  // cualquier estado en el que no toca sonar local pausa el elemento.
   useEffect(() => {
     const audio = audioRef.current
-    if (!audio || source !== 'local') return
-    if (localPlaying && currentLocal) {
+    if (!audio) return
+    if (source === 'local' && localPlaying && currentLocal) {
       if (audio.readyState >= 2 && !audio.paused) return
       if (audio.readyState >= 2) void audio.play().catch(() => undefined)
-    } else audio.pause()
+    } else {
+      audio.pause()
+    }
   }, [localPlaying, localIndex, source, currentLocal])
 
+  // Solo una fuente suena a la vez: al cambiar de fuente se pausa la
+  // otra DE INMEDIATO (además del efecto del <audio> y del de YouTube),
+  // para que nunca suenen local y YouTube juntas ni la mini-barra se
+  // quede mostrando la fuente equivocada.
   function switchSource(next: 'youtube' | 'local') {
-    if (next === 'youtube') setLocalPlaying(false)
-    else setPlaying(false)
+    if (next === 'youtube') {
+      try { audioRef.current?.pause() } catch { /* noop */ }
+      setLocalPlaying(false)
+    } else {
+      try { playerRef.current?.pauseVideo() } catch { /* noop */ }
+      setPlaying(false)
+    }
     setSource(next)
   }
 

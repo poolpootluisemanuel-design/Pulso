@@ -15,7 +15,7 @@
 //    (ese archivo se lee en remoto, no hace falta recompilar).
 // El version.json que viaja DENTRO del APK no se usa para comparar:
 // la comparación siempre lee el remoto de GitHub.
-export const APP_BUILD = 23 // Build 23: ícono launcher nuevo (logo P con pulso, paleta cálida).
+export const APP_BUILD = 24 // Build 24: una sola fuente de música a la vez + mini-barra que refleja lo que suena.
 
 export interface RemoteVersion {
   versionCode: number
