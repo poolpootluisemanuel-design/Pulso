@@ -1,13 +1,14 @@
 // Música para entrenar: YouTube o música local del teléfono (opcional).
 // - YouTube: cada preset es un VIDEO REAL de YouTube (mix largo de
-//   música para entrenar), verificado con yt-dlp: playable_in_embed=True
-//   y oEmbed 200 para los 8 IDs. El embed viejo usaba
-//   youtube-nocookie.com/embed?listType=search, que en el navegador
-//   muestra "Este video no está disponible" y nunca suena: por eso Luis
-//   lo percibía como que "se resetea". Ahora se incrusta con la API
-//   oficial de YouTube (iframe_api) sobre youtube.com/embed/<videoId>.
-//   Si un video falla al incrustarse (error 101/150), se muestra el
-//   aviso y el botón "Abrir en YouTube" sigue funcionando.
+//   música para entrenar). Suena SOLO por el extractor + el
+//   reproductor nativo (ExoPlayer en la app): el extractor resuelve
+//   la URL directa de audio y el reproductor nativo la baja y la
+//   decodifica fuera del WebView, así sigue sonando al salir de la
+//   app y con la pantalla apagada. NO hay video incrustado (embed):
+//   el iframe se pausaba al salir y era el fallo que Luis reportó,
+//   así que se quitó por completo (2026-11-19). Si el extractor no
+//   responde, la app avisa y el botón "Probar de nuevo" reintenta;
+//   el botón "Abrir en YouTube" abre el video en la app de YouTube.
 // - El usuario puede pegar su propia playlist/video y se guarda.
 // - NO se puede descargar música de YouTube. La opción local es solo
 //   para canciones que el usuario YA tenga descargadas en su teléfono.
@@ -17,18 +18,14 @@
 //   suena directo, sin copiar ni subir nada. En web sigue el
 //   <input type=file> de siempre y la lista no persiste al cerrar.
 // - Este componente vive MONTADO EN App.tsx, fuera de las pestañas:
-//   nunca se oculta con display:none (eso pausa el iframe de YouTube).
-//   Por defecto es una MINI-BARRA fija y pequeña en todas las pestañas
-//   (también en Entrenar); solo se expande a una hoja baja (40vh) con
-//   el video en miniatura cuando Luis la abre, y se recoge sola al
-//   cambiar de pestaña. El audio sigue sonando al recogerla.
-// - Segundo plano (app nativa): mientras suena, el plugin
-//   PulsoAudio mantiene un servicio en primer plano ("PULSO ·
-//   Sonando") para que el audio siga al salir de la app o con la
-//   pantalla apagada. YouTube con pantalla apagada puede pausarse
-//   igual (límite del embed): para mayor seguridad, "Abrir en
-//   YouTube" con Premium. En web no hay servicio: el navegador
-//   pausa el audio al bloquear la pantalla.
+//   nunca se oculta con display:none. Por defecto es una MINI-BARRA
+//   fija y pequeña en todas las pestañas (también en Entrenar); solo
+//   se expande a una hoja baja (40vh) cuando Luis la abre, y se recoge
+//   sola al cambiar de pestaña. El audio sigue sonando al recogerla.
+// - Segundo plano (app nativa): mientras suena, el reproductor nativo
+//   mantiene un servicio en primer plano ("PULSO · Sonando") para que
+//   el audio siga al salir de la app o con la pantalla apagada. En web
+//   no hay servicio: el navegador pausa el audio al bloquear la pantalla.
 // - "Abrir en YouTube" usa el plugin @capacitor/browser: window.open
 //   con '_blank' se ignora en la WebView de Capacitor y el botón no
 //   abría nada (ver lib/openExternal.ts).
@@ -52,7 +49,6 @@ import { listPlaylist, resolveVideo, ytThumbnail, type ExtractorTrack } from '..
 import { openExternalUrl } from '../lib/openExternal'
 
 // Videos reales de YouTube por deporte (mixes largos, públicos).
-// Verificados 2026-11-16 con yt-dlp: playable_in_embed=True, oEmbed 200.
 // NO inventar IDs: si se cambia uno, verificarlo igual antes de subirlo.
 export interface Preset { id: string; label: string; emoji: string; query: string; videoId: string }
 export const MUSIC_PRESETS: Preset[] = [
@@ -86,17 +82,6 @@ export function parseYouTubeUrl(url: string): { kind: 'playlist' | 'video'; id: 
   const embed = u.match(/\/(?:embed|shorts|live)\/([A-Za-z0-9_-]{6,})/)
   if (embed) return { kind: 'video', id: embed[1] }
   return null
-}
-
-// Embed de respaldo (solo si la API de YouTube no carga): youtube.com,
-// video real, NUNCA listType=search en youtube-nocookie (ese no suena).
-// Src FIJA por video: antes incluía `playing` (autoplay) y la key del
-// iframe también, así que cada toque de Reproducir/Pausa recreaba el
-// iframe y el video volvía a empezar desde 0.
-function embedSrc(preset: Preset, custom: { kind: 'playlist' | 'video'; id: string } | null): string {
-  if (custom?.kind === 'playlist') return `https://www.youtube.com/embed/videoseries?list=${custom.id}&rel=0`
-  if (custom?.kind === 'video') return `https://www.youtube.com/embed/${custom.id}?rel=0`
-  return `https://www.youtube.com/embed/${preset.videoId}?rel=0`
 }
 
 // Link normal de YouTube para abrir en la app / pestaña de YouTube.
@@ -199,22 +184,6 @@ function SeekBar({ current, total, onSeek, dark }: { current: number; total: num
 
 export interface MusicStatus { playing: boolean; title: string; source: 'youtube' | 'local' }
 
-declare global {
-  interface Window {
-    YT?: { Player: new (el: HTMLElement, opts: Record<string, unknown>) => unknown; PlayerState?: { PLAYING: number; PAUSED: number; ENDED: number; CUED: number; BUFFERING: number } }
-    onYouTubeIframeAPIReady?: () => void
-  }
-}
-
-type YTPlayer = {
-  playVideo: () => void
-  pauseVideo: () => void
-  cueVideoById: (id: string) => void
-  cuePlaylist: (opts: { list: string }) => void
-  loadVideoById: (id: string) => void
-  destroy: () => void
-}
-
 export default function MusicPlayer({ profileId, compact, expanded, onExpandedChange, onPlayingChange, onGoTrain, immersive }: {
   profileId: string
   compact?: boolean
@@ -301,14 +270,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Reproductor de YouTube (API oficial). El div del reproductor es
-  // siempre el PRIMER hijo del componente y nunca se desmonta: en modo
-  // compacto solo se hace chiquito, pero sigue visible y sonando.
-  const playerDivRef = useRef<HTMLDivElement | null>(null)
-  const playerRef = useRef<YTPlayer | null>(null)
-  // Último estado REAL del reproductor de YouTube (-1 = sin empezar).
-  // Es la única fuente para decidir si hay que ordenar play/pausa.
-  const ytStateRef = useRef<number>(-1)
   // Espejos de `playing` / `localPlaying` para leerlos dentro de
   // efectos y callbacks sin que el closure quede desfasado.
   const playingRef = useRef(false)
@@ -319,33 +280,24 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // foco de audio): como mucho 3 seguidos; al sonar se resetea. Sin
   // tope, un sistema que pausa en bucle reintentaría sin parar.
   const audioResumeTriesRef = useRef(0)
-  // Qué video/playlist ya está cargado en el reproductor: el cue solo
-  // se hace cuando cambia, nunca al volver de otra pestaña o de local.
-  const lastCuedRef = useRef<string | null>(null)
-  const [ytReady, setYtReady] = useState(false)
-  const [ytPlayerReady, setYtPlayerReady] = useState(false)
-  const [ytFailed, setYtFailed] = useState(false)
-  const [ytError, setYtError] = useState('')
 
-  // Modo extractor: la cola de YouTube suena por el <audio> con la URL
-  // directa del extractor (segundo plano real). 'embed' es el
-  // comportamiento de siempre (iframe); se llega ahí solo si el
-  // extractor falla, y "Probar de nuevo" vuelve a intentarlo.
-  const [ytMode, setYtMode] = useState<'extractor' | 'embed'>('extractor')
+  // YouTube suena SOLO por el extractor (sin embed): la cola se
+  // resuelve video por video a su URL directa de audio. Si el
+  // extractor falla se muestra el aviso y "Probar de nuevo"
+  // reintenta (ytRetry re-dispara la resolución).
   const [ytQueue, setYtQueue] = useState<ExtractorTrack[]>(() => loadYtQueue())
   const [ytQueueIndex, setYtQueueIndex] = useState(0)
   const [ytAudioUrl, setYtAudioUrl] = useState<string | null>(null)
   const [ytResolving, setYtResolving] = useState(false)
   const [ytExtractErr, setYtExtractErr] = useState('')
+  const [ytRetry, setYtRetry] = useState(0)
   // Tiempo del <audio> para la barrita de minutos (modo extractor).
   const [ytTime, setYtTime] = useState({ current: 0, duration: 0 })
   // Para qué video ya se resolvió ytAudioUrl (resolver perezoso).
   const ytResolvedForRef = useRef<string | null>(null)
-  // Espejos de `source` / `ytMode` para los handlers del <audio>.
+  // Espejo de `source` para los handlers del <audio>.
   const sourceRef = useRef<'youtube' | 'local'>('youtube')
-  const ytModeRef = useRef<'extractor' | 'embed'>('extractor')
   useEffect(() => { sourceRef.current = source }, [source])
-  useEffect(() => { ytModeRef.current = ytMode }, [ytMode])
 
   const preset = MUSIC_PRESETS.find((p) => p.id === pref.presetId) || MUSIC_PRESETS[MUSIC_PRESETS.length - 1]
   const custom = parseYouTubeUrl(pref.customUrl)
@@ -353,8 +305,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const title = useCustom ? (pref.customLabel || 'Mi playlist de YouTube') : `Música para ${preset.label.toLowerCase()}`
   const currentLocal = localTracks[localIndex] || null
   const anyPlaying = playing || localPlaying
-  // En modo extractor la canción que suena es la de la cola.
-  const ytExtractorActive = source === 'youtube' && ytMode === 'extractor'
+  // YouTube = extractor (único modo, sin embed): la canción que
+  // suena es la de la cola.
+  const ytExtractorActive = source === 'youtube'
   const ytCurrent = ytQueue[ytQueueIndex] ?? null
   const statusTitle = source === 'local' && currentLocal
     ? cleanTrackName(currentLocal.name)
@@ -368,7 +321,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   useEffect(() => {
     nativeAudioRef.current = useNativePlayer && ((source === 'local' && !!currentLocal?.nativeUri) || ytExtractorActive)
   }, [useNativePlayer, source, currentLocal, ytExtractorActive])
-  const playingTitle = `PULSO — ${statusTitle}`
   // Título CORTO para la mini-barra: el título completo ("Música para
   // correr…") se cortaba como "Músic…" porque no cabe junto al play,
   // la miniatura y los botones. En la mini-barra basta el deporte o el
@@ -383,126 +335,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   useEffect(() => {
     onPlayingChange?.({ playing: anyPlaying, title: statusTitle, source })
   }, [anyPlaying, statusTitle, source, onPlayingChange])
-
-  // Cargar la API de YouTube una sola vez.
-  useEffect(() => {
-    if (window.YT?.Player) { setYtReady(true); return }
-    const prev = window.onYouTubeIframeAPIReady
-    window.onYouTubeIframeAPIReady = () => { prev?.(); setYtReady(true) }
-    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-      const s = document.createElement('script')
-      s.src = 'https://www.youtube.com/iframe_api'
-      s.async = true
-      s.onerror = () => setYtFailed(true)
-      document.head.appendChild(s)
-    }
-    const t = setTimeout(() => { if (!window.YT?.Player) setYtFailed(true) }, 10000)
-    return () => clearTimeout(t)
-  }, [])
-
-  // Crear el reproductor de YouTube cuando la API está lista.
-  useEffect(() => {
-    if (!ytReady || ytFailed || playerRef.current || !playerDivRef.current || !window.YT) return
-    try {
-      const player = new window.YT.Player(playerDivRef.current, {
-        width: '100%',
-        height: '100%',
-        videoId: preset.videoId,
-        playerVars: { rel: 0, playsinline: 1 },
-        events: {
-          onReady: () => setYtPlayerReady(true),
-          onStateChange: (e: { data: number }) => {
-            const st = window.YT?.PlayerState
-            if (!st) return
-            ytStateRef.current = e.data
-            // El iframe sigue montado y cargado aunque en modo
-            // extractor esté oculto y nunca suene: sus cambios de
-            // estado NO deben tocar `playing`, porque apagan el
-            // servicio en primer plano y matan el stream del
-            // extractor (pantalla apagada, build 37). Solo en modo
-            // embed el iframe es la fuente que suena.
-            if (sourceRef.current !== 'youtube' || ytModeRef.current !== 'embed') return
-            // BUFFERING (3): no tocar `playing`, el video sigue en el
-            // mismo punto y solo está cargando. CUED (5) y UNSTARTED
-            // (-1): el video está parado en 0, así que el botón debe
-            // decir Reproducir, no Pausa. Antes cualquier estado
-            // distinto de PLAYING que no fuera PAUSED/ENDED dejaba el
-            // botón desfasado del audio real.
-            if (e.data === st.PLAYING) setPlaying(true)
-            else if (e.data === st.PAUSED || e.data === st.ENDED || e.data === st.CUED || e.data === -1) setPlaying(false)
-          },
-          onError: (e: { data: number }) => {
-            // En modo extractor el iframe no suena: su error no es
-            // error del audio y no debe parar nada.
-            if (sourceRef.current !== 'youtube' || ytModeRef.current !== 'embed') return
-            setPlaying(false)
-            setYtError(e.data === 101 || e.data === 150
-              ? 'Este video no permite verse incrustado. Ábrelo en YouTube con el botón de abajo.'
-              : 'YouTube no pudo reproducir este video aquí. Ábrelo en YouTube con el botón de abajo.')
-          },
-        },
-      }) as unknown as YTPlayer
-      playerRef.current = player
-    } catch {
-      setYtFailed(true)
-    }
-    return () => {
-      try { playerRef.current?.destroy() } catch { /* noop */ }
-      playerRef.current = null
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytReady, ytFailed])
-
-  // Cargar el video/playlist que toca (preset o link del usuario).
-  // SOLO en modo embed: en modo extractor el iframe nunca suena y
-  // la cola va por el <audio>.
-  // SOLO cuando cambia el video: antes se hacía cueVideoById cada vez
-  // que cambiaba la fuente o se re-activaba el reproductor, y el video
-  // volvía a empezar desde 0 al volver de música local o de otra
-  // pestaña. `lastCuedRef` recuerda qué video ya está cargado.
-  useEffect(() => {
-    if (!ytPlayerReady || !playerRef.current || source !== 'youtube' || ytMode !== 'embed') return
-    const target = custom?.kind === 'playlist' ? `playlist:${custom.id}` : custom?.kind === 'video' ? `video:${custom.id}` : `video:${preset.videoId}`
-    if (lastCuedRef.current === target) return
-    lastCuedRef.current = target
-    setYtError('')
-    const wasPlaying = playingRef.current
-    try {
-      if (custom?.kind === 'playlist') playerRef.current.cuePlaylist({ list: custom.id })
-      else if (custom?.kind === 'video') playerRef.current.cueVideoById(custom.id)
-      else playerRef.current.cueVideoById(preset.videoId)
-      // cue deja el video en pausa en 0: sincronizar el botón.
-      ytStateRef.current = window.YT?.PlayerState?.CUED ?? 5
-      setPlaying(false)
-      if (wasPlaying) playerRef.current.playVideo()
-    } catch {
-      setYtFailed(true)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytPlayerReady, preset.id, custom?.kind, custom?.id, source, ytMode])
-
-  // Play / pausa de YouTube (la API lo controla, sin recargar el iframe).
-  // Solo en modo embed: en modo extractor el play/pausa es del <audio>.
-  // Solo se ordena cuando el estado deseado difiere del estado real del
-  // reproductor: antes cada cambio de `playing` —incluidos los que venían
-  // del propio onStateChange— volvía a llamar a playVideo/pauseVideo.
-  useEffect(() => {
-    if (!ytPlayerReady || !playerRef.current || source !== 'youtube' || ytMode !== 'embed') return
-    const st = window.YT?.PlayerState
-    if (!st) return
-    try {
-      if (playing && ytStateRef.current !== st.PLAYING) playerRef.current.playVideo()
-      else if (!playing && ytStateRef.current === st.PLAYING) playerRef.current.pauseVideo()
-    } catch { /* noop */ }
-  }, [playing, ytPlayerReady, source, ytMode])
-
-  // Al pasar a música local, pausar YouTube (solo en modo embed: en
-  // modo extractor el iframe nunca suena).
-  useEffect(() => {
-    if (source === 'local' && ytMode === 'embed') {
-      try { playerRef.current?.pauseVideo() } catch { /* noop */ }
-    }
-  }, [source, ytMode])
 
   // Mantener pantalla encendida mientras suena. Fallback silencioso.
   useEffect(() => {
@@ -600,14 +432,14 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   }, [anyPlaying, useNativePlayer])
 
   // El reproductor nativo avisa cuando termina la canción o falla:
-  // avanzar la cola igual que el onEnded del <audio>, o caer al
-  // embed si el extractor falló. El handler vive en un ref para no
+  // avanzar la cola igual que el onEnded del <audio>, o avisar si
+  // el extractor falló. El handler vive en un ref para no
   // re-suscribirse con valores desfasados.
   const playerEventRef = useRef<(ev: { type: PlayerEventType; message?: string }) => void>(() => undefined)
   useEffect(() => {
     playerEventRef.current = (ev: { type: PlayerEventType; message?: string }) => {
       if (ev.type === 'ended') {
-        if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor' && ytQueue.length > 1) {
+        if (sourceRef.current === 'youtube' && ytQueue.length > 1) {
           setYtQueueIndex((i) => (i + 1) % ytQueue.length)
           setYtAudioUrl(null)
           ytResolvedForRef.current = null
@@ -615,8 +447,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           playLocal((localIndex + 1) % localTracks.length)
         }
       } else if (ev.type === 'error') {
-        if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') {
-          fallbackToEmbed('El reproductor no pudo sonar este audio. Suena el video embebido como antes; toca "Probar de nuevo" para reintentarlo.')
+        if (sourceRef.current === 'youtube') {
+          setYtExtractErr('El reproductor no pudo sonar este audio. Toca "Probar de nuevo" para reintentarlo.')
+          setPlaying(false)
         } else {
           setLocalPlaying(false)
         }
@@ -634,47 +467,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     return () => { cancelled = true; void handle?.remove() }
   }, [useNativePlayer])
 
-  // Media Session (YouTube, modo embed).
-  useEffect(() => {
-    // En la app nativa manda la sesión NATIVA (PulsoAudioPlugin):
-    // la de la WebView no genera notificación del sistema.
-    if (useNativePlayer) return
-    if (source !== 'youtube' || ytMode !== 'embed') return
-    const ms = navigator.mediaSession
-    if (!ms) return
-    if (!playing) {
-      ms.metadata = null
-      return
-    }
-    try {
-      ms.metadata = new MediaMetadata({
-        title: playingTitle,
-        artist: 'PULSO',
-        album: 'Entrena con pulso',
-        artwork: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
-      })
-      ms.setActionHandler('play', () => setPlaying(true))
-      ms.setActionHandler('pause', () => setPlaying(false))
-    } catch { /* noop */ }
-    return () => {
-      try { ms.setActionHandler('play', null); ms.setActionHandler('pause', null) } catch { /* noop */ }
-    }
-  }, [playing, playingTitle, source, ytMode])
-
-  // Si el extractor falla, se cae al embed como antes y se avisa:
-  // "Probar de nuevo" vuelve a intentar el extractor.
-  function fallbackToEmbed(reason: string) {
-    setYtExtractErr(reason)
-    setYtAudioUrl(null)
-    ytResolvedForRef.current = null
-    setYtMode('embed')
-  }
-
+  // Si el extractor falla se muestra el aviso: "Probar de nuevo"
+  // limpia el error y re-dispara la resolución (ytRetry).
   function retryExtractor() {
     setYtExtractErr('')
     setYtAudioUrl(null)
     ytResolvedForRef.current = null
-    setYtMode('extractor')
+    setYtRetry((n) => n + 1)
   }
 
   // La cola se guarda en este teléfono al cambiar.
@@ -688,7 +487,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   }, [ytQueue, ytQueueIndex])
 
   // Resolver perezoso: solo la canción que suena pide su URL directa
-  // de audio al extractor. Si falla, se cae al embed.
+  // de audio al extractor. Si falla, se muestra el aviso (sin embed).
   useEffect(() => {
     if (!ytExtractorActive) return
     const track = ytCurrent
@@ -710,11 +509,12 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       .catch(() => {
         if (cancelled) return
         setYtResolving(false)
-        fallbackToEmbed('El extractor no respondió. Suena el video embebido como antes; toca "Probar de nuevo" para reintentarlo.')
+        setYtExtractErr('El extractor no respondió. Toca "Probar de nuevo" para reintentarlo.')
+        setPlaying(false)
       })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytExtractorActive, ytCurrent?.id])
+  }, [ytExtractorActive, ytCurrent?.id, ytRetry])
 
   // Media Session (extractor): la cola suena por <audio>; la pantalla
   // de bloqueo muestra la canción actual con su foto y los controles.
@@ -802,11 +602,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     saveMusicPref(profileId, merged)
   }
 
-  // Agregar un link de YouTube: en modo embed se guarda y suena el
-  // embed como antes; en modo extractor el link se agrega a la cola
+  // Agregar un link de YouTube: el link se agrega a la cola
   // (video: se resuelve y se agrega; playlist: se agregan todos sus
-  // videos). El link también se guarda en el pref, así el embed sigue
-  // teniendo qué sonar si el extractor falla.
+  // videos). El link también se guarda en el pref.
   async function saveCustom() {
     const parsed = parseYouTubeUrl(customInput)
     if (!parsed) {
@@ -815,16 +613,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     }
     setCustomErr('')
     update({ customUrl: customInput.trim(), customLabel: parsed.kind === 'playlist' ? 'Mi playlist de YouTube' : 'Mi video de YouTube' })
-    if (ytMode !== 'extractor' || source !== 'youtube') {
-      // En modo embed el video también entra a la cola (la playlist
-      // no: sus videos solo se conocen resolviéndola con el extractor).
-      if (parsed.kind === 'video') {
-        addYtTrack({ id: parsed.id, title: 'Mi video de YouTube', thumbnail: ytThumbnail(parsed.id) })
-      } else {
-        setPlaying(true)
-      }
-      return
-    }
     setYtResolving(true)
     try {
       if (parsed.kind === 'video') {
@@ -848,8 +636,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         setPlaying(true)
       }
     } catch {
-      fallbackToEmbed('El extractor no respondió al agregar tu link. Suena el video embebido como antes; toca "Probar de nuevo" para reintentarlo.')
-      setPlaying(true)
+      setYtExtractErr('El extractor no respondió al agregar tu link. Toca "Probar de nuevo" para reintentarlo.')
     } finally {
       setYtResolving(false)
     }
@@ -904,20 +691,12 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     setLocalPlaying(true)
   }
 
-  // Cola de YouTube: sonar una canción. En modo extractor va por el
-  // <audio> con la URL resuelta; en modo embed la canción se pone como
-  // video personalizado y el efecto de cue del iframe la carga y la
-  // reproduce. `trackOverride` es para agregar: la canción aún no está
-  // en `ytQueue` cuando se llama.
+  // Cola de YouTube: sonar una canción. Va por el extractor con la
+  // URL resuelta. `trackOverride` es para agregar: la canción aún no
+  // está en `ytQueue` cuando se llama.
   function playYtTrack(index: number, trackOverride?: ExtractorTrack) {
     const track = trackOverride ?? ytQueue[index]
     if (!track) return
-    if (ytMode !== 'extractor' || source !== 'youtube') {
-      if (index !== ytQueueIndex) setYtQueueIndex(index)
-      update({ customUrl: `https://www.youtube.com/watch?v=${track.id}`, customLabel: track.title })
-      setPlaying(true)
-      return
-    }
     if (ytQueue.length === 0) return
     if (index !== ytQueueIndex) {
       setYtQueueIndex(index)
@@ -949,13 +728,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       setYtAudioUrl(null)
       ytResolvedForRef.current = null
     }
-    // En modo embed la canción que suena es la del pref: si se borró
-    // la que sonaba, se pone en cola la que quedó como actual.
-    if (ytMode !== 'extractor' && source === 'youtube' && index === ytQueueIndex && next[newIndex]) {
-      const t = next[newIndex]
-      update({ customUrl: `https://www.youtube.com/watch?v=${t.id}`, customLabel: t.title })
-      setPlaying(true)
-    }
   }
 
   function moveYtTrack(index: number, dir: -1 | 1) {
@@ -970,13 +742,12 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     else if (ytQueueIndex === j) setYtQueueIndex(index)
   }
 
-  // Un preset en modo extractor: si ya está en la cola salta a él; si
-  // no, entra después de la canción actual y suena. El preset también
-  // se guarda en el pref, así el embed lo tiene si hace falta.
+  // Un preset: si ya está en la cola salta a él; si no, entra
+  // después de la canción actual y suena. El preset también se
+  // guarda en el pref.
   function tapPreset(p: Preset) {
     update({ presetId: p.id, customUrl: '' })
     setCustomInput('')
-    if (ytMode !== 'extractor' || source !== 'youtube') return
     const at = ytQueue.findIndex((t) => t.id === p.videoId)
     if (at >= 0) { playYtTrack(at); return }
     const track: ExtractorTrack = { id: p.videoId, title: `Música para ${p.label.toLowerCase()}`, thumbnail: ytThumbnail(p.videoId) }
@@ -1065,7 +836,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       try { audioRef.current?.pause() } catch { /* noop */ }
       setLocalPlaying(false)
     } else {
-      try { playerRef.current?.pauseVideo() } catch { /* noop */ }
       setPlaying(false)
     }
     setSource(next)
@@ -1078,33 +848,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     else setPlaying(!playing)
   }
 
-  // Div del reproductor de YouTube: UN SOLO nodo, siempre el mismo,
-  // siempre montado como primer hijo de la raíz. En mini-barra y en la
-  // hoja expandida el video es solo una MINIATURA (h-12/h-24): antes
-  // en la hoja ocupaba todo el ancho en 16:9 y tapaba la sección.
-  // Con música local se oculta en la hoja (el audio es lo que suena);
-  // en mini-barra el nodo sigue montado para que no se recargue.
-  const ytPlayer = ytFailed ? (
-    <iframe
-      key={useCustom ? 'custom-' + pref.customUrl : 'preset-' + preset.id}
-      className={ytExtractorActive ? 'hidden' : !expanded ? 'h-12 w-20 shrink-0 rounded-lg' : source === 'local' ? 'hidden' : 'h-24 w-40 shrink-0 rounded-lg bg-slate-900'}
-      src={embedSrc(preset, custom)}
-      title={useCustom ? pref.customLabel : `YouTube: ${preset.label}`}
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-      allowFullScreen
-    />
-  ) : (
-    <div
-      ref={playerDivRef}
-      className={ytExtractorActive ? 'hidden' : !expanded
-        ? 'h-12 w-20 shrink-0 overflow-hidden rounded-lg bg-slate-900'
-        : source === 'local' ? 'hidden'
-        : 'h-24 w-40 shrink-0 overflow-hidden rounded-lg bg-slate-900'}
-    />
-  )
-
-  // Presets y campo de link: iguales en modo extractor y en modo embed
-  // (en extractor, el preset salta a la cola y el link se agrega).
+  // Presets y campo de link: el preset salta a la cola y el link se agrega.
   const presetButtons = (
     <div className="flex flex-wrap gap-2">
       {MUSIC_PRESETS.map((p) => (
@@ -1138,11 +882,8 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     </>
   )
 
-  // La cola se ve en AMBOS modos (extractor y embed): antes solo
-  // estaba en la rama del extractor y al caer al embed desaparecía
-  // por completo. Tocar una fila suena esa canción en el modo que
-  // esté activo (playYtTrack ramifica); ↑ ↓ ✕ y el guardado en el
-  // teléfono son los mismos en los dos modos.
+  // La cola se ve siempre: tocar una fila suena esa canción
+  // (playYtTrack); ↑ ↓ ✕ y el guardado en el teléfono son los mismos.
   const ytQueueList = ytQueue.length === 0 ? (
     <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Tu lista está vacía. Agrega una canción con el link de abajo o toca un preset.</p>
   ) : (
@@ -1162,18 +903,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     </div>
   )
 
-  // Una sola raíz y el div de YouTube siempre como primer hijo: al
-  // pasar de mini-barra a hoja (y al revés) React conserva el mismo
-  // nodo DOM y el reproductor NO se recarga ni se corta.
-  // La hoja expandida es BAJA: max-h-[40vh] con scroll interno, y el
-  // video es solo una miniatura. Antes era 62vh con video 16:9 a todo
-  // lo ancho y tapaba la sección completa. Por defecto todo es
-  // mini-barra (también en Entrenar); la hoja solo se abre al tocar ▲.
+  // Una sola raíz. La hoja expandida es BAJA: max-h-[40vh] con scroll
+  // interno. Por defecto todo es mini-barra (también en Entrenar); la
+  // hoja solo se abre al tocar ▲.
   return (
     <div className={!expanded
       ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
       : 'max-h-[40vh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white p-3 shadow-xl shadow-night/20'}>
-      {ytPlayer}
       {ytExtractorActive && <TrackThumb track={ytCurrent} className="h-12 w-12" />}
       {!expanded ? (
         <>
@@ -1186,7 +922,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold">🎵 {miniTitle}</p>
-            <p className="truncate text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : ytExtractorActive ? 'YouTube · extractor' : 'YouTube'}{ytResolving ? ' · Resolviendo…' : ''}</p>
+            <p className="truncate text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}{ytResolving ? ' · Resolviendo…' : ''}</p>
             {ytExtractorActive && ytCurrent && (
               <SeekBar current={ytTime.current} total={ytTime.duration || ytCurrent.durationSec || 0} onSeek={seekYt} dark />
             )}
@@ -1254,7 +990,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           </div>
           <div className="mt-2 space-y-3">
           <p className="text-sm text-slate-600">
-            Sigue sonando al cambiar de pestaña y al salir de la app: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando"). Con la pantalla apagada, la música local sigue; YouTube puede pausarse: para mayor seguridad ábrela en YouTube con Premium.
+            Sigue sonando al cambiar de pestaña y al salir de la app: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando"). Con la pantalla apagada sigue sonando todo, porque el audio sale del reproductor nativo de la app.
           </p>
 
           <div className="flex gap-2">
@@ -1279,11 +1015,16 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   📶 Sin internet: YouTube no suena. Cambia a 📱 Música local, que sí funciona sin datos.
                 </p>
               )}
-              {ytMode === 'extractor' ? (
-                <>
-                  <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
-                    Suena por el extractor: audio directo en segundo plano, con la pantalla apagada. Tu lista se guarda en este teléfono.
+              <>
+                {ytExtractErr && (
+                  <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">
+                    {ytExtractErr}{' '}
+                    <button className="font-bold underline" onClick={retryExtractor}>Probar de nuevo</button>
                   </p>
+                )}
+                <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
+                  Suena por el extractor: audio directo en segundo plano, con la pantalla apagada. Tu lista se guarda en este teléfono.
+                </p>
                   {ytResolving && <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Resolviendo audio…</p>}
                   {ytCurrent && (
                     <div className="space-y-2 rounded-xl bg-sage-100 p-3">
@@ -1316,48 +1057,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                     </Btn>
                   </div>
                   {customField}
-                </>
-              ) : (
-                <>
-                  {ytExtractErr && (
-                    <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">
-                      {ytExtractErr}{' '}
-                      <button className="font-bold underline" onClick={retryExtractor}>Probar de nuevo</button>
-                    </p>
-                  )}
-                  {ytQueueList}
-                  {presetButtons}
-
-                  {/* El video ya está arriba como primer hijo de la raíz
-                      (una sola instancia): NO se vuelve a renderizar aquí.
-                      Antes aparecía dos veces y el ref quedaba en esta
-                      segunda copia, que se desmontaba al pasar a mini-barra. */}
-                  {ytError && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{ytError}</p>}
-
-                  <div className="flex items-center gap-2">
-                    <Btn variant={playing ? 'ghost' : 'coral'} className="flex-1" onClick={() => setPlaying(!playing)}>
-                      {playing ? '⏸ Pausa' : '▶ Reproducir'}
-                    </Btn>
-                    {/* Abrir en YouTube con el plugin @capacitor/browser:
-                        ANTES era window.open(..., '_blank'), que la
-                        WebView de Capacitor ignora en silencio (no tiene
-                        onCreateWindow): el botón no abría nada y la
-                        playlist de Luis nunca salía. Ahora sí se abre su
-                        playlist tal como la pegó, con su lista completa. */}
-                    <Btn variant="teal" className="flex-1" onClick={() => void openExternalUrl(externalUrl(preset, custom))}>
-                      ▶ Abrir en YouTube
-                    </Btn>
-                  </div>
                   {useCustom && (
                     <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
                       Tu playlist guardada: {pref.customLabel || 'Mi playlist de YouTube'}. El botón de arriba abre esa lista en YouTube.
                     </p>
                   )}
-
-                  {customField}
                 </>
-              )}
-            </>
+              </>
           ) : (
             <>
               {nativeMusic ? (
@@ -1491,12 +1197,12 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           const audio = audioRef.current
           if (!audio || !audio.paused) return
           if (sourceRef.current === 'local' && localPlayingRef.current) void audio.play().catch(() => undefined)
-          else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor' && playingRef.current) void audio.play().catch(() => undefined)
+          else if (sourceRef.current === 'youtube' && playingRef.current) void audio.play().catch(() => undefined)
         }}
         onPlay={() => {
           audioResumeTriesRef.current = 0
           if (sourceRef.current === 'local') setLocalPlaying(true)
-          else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') setPlaying(true)
+          else if (sourceRef.current === 'youtube') setPlaying(true)
         }}
         onPause={() => {
           const audio = audioRef.current
@@ -1509,7 +1215,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               const a = audioRef.current
               if (a && a.ended && a.paused) {
                 if (sourceRef.current === 'local') setLocalPlaying(false)
-                else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') setPlaying(false)
+                else if (sourceRef.current === 'youtube') setPlaying(false)
               }
             }, 150)
             return
@@ -1524,7 +1230,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               audioResumeTriesRef.current += 1
               window.setTimeout(() => { void audioRef.current?.play().catch(() => setLocalPlaying(false)) }, 400)
             } else setLocalPlaying(false)
-          } else if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') {
+          } else if (sourceRef.current === 'youtube') {
             if (playingRef.current && audioResumeTriesRef.current < 3) {
               audioResumeTriesRef.current += 1
               window.setTimeout(() => { void audioRef.current?.play().catch(() => setPlaying(false)) }, 400)

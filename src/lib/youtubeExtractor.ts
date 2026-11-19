@@ -4,8 +4,9 @@
 // segundo plano con el servicio en primer plano. Solo resuelve: el
 // teléfono baja el audio directo de googlevideo, sin descargas ni
 // proxy. Si el servidor no responde, pide clave y no hay, o devuelve
-// error, se lanza una excepción y el reproductor cae al embed de
-// YouTube como antes (ver MusicPlayer, ytMode 'embed').
+// error, se lanza una excepción y el reproductor muestra el aviso
+// con "Probar de nuevo" (ver MusicPlayer). Ya NO hay video
+// incrustado de respaldo: el embed se quitó por completo.
 export interface ExtractorTrack {
   id: string
   title: string
