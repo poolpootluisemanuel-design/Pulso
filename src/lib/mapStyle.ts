@@ -14,6 +14,15 @@
 // - La primera carga de los tiles vectoriales tarda unos segundos en el
 //   teléfono: eso NO es un error y NO dispara el respaldo.
 import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl'
+import { setWorkerUrl } from 'maplibre-gl'
+// El worker de MapLibre 6 es el que procesa los tiles vectoriales.
+// Vite NO lo emite solo (la URL se arma en tiempo de ejecución dentro
+// de MapLibre como './maplibre-gl-worker.mjs' junto al bundle), así que
+// sin esto el mapa vectorial quedaba en blanco y solo los raster
+// (oscuro / satélite, que no usan worker) se veían. Con ?url Vite emite
+// el archivo con hash y setWorkerUrl apunta ahí antes de crear el mapa.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
+setWorkerUrl(maplibreWorkerUrl)
 
 export type Basemap = 'sport' | 'satellite' | 'dark'
 
