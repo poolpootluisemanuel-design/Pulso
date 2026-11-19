@@ -1,13 +1,19 @@
 import { useMemo, useState } from 'react'
-import type { Profile } from '../lib/types'
+import type { Post, Profile } from '../lib/types'
 import { LEVELS, SPORTS, ZONES } from '../lib/types'
 import { Card, Empty, Tag, selectCls } from './ui'
+import PublicProfile from './PublicProfile'
 
-export default function Search({ profiles, meId }: { profiles: Profile[]; meId: string }) {
+export default function Search({ profiles, meId, posts }: { profiles: Profile[]; meId: string; posts: Post[] }) {
   const [sport, setSport] = useState('')
   const [level, setLevel] = useState('')
   const [zone, setZone] = useState('')
   const [day, setDay] = useState('')
+  // Perfil que se está consultando: el mismo visor de solo lectura
+  // que usa Comunidad (PublicProfile). Los datos ya están aquí
+  // (listProfiles lee profiles_public, sin correo), no hace falta
+  // otra consulta. Se cierra con ✕ Cerrar o tocando fuera.
+  const [viewProfile, setViewProfile] = useState<Profile | null>(null)
 
   const results = useMemo(() => {
     return profiles.filter((p) => {
@@ -53,11 +59,16 @@ export default function Search({ profiles, meId }: { profiles: Profile[]; meId: 
         <div className="space-y-2">
           {results.map((p) => (
             <Card key={p.id}>
-              <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 text-left"
+                onClick={() => setViewProfile(p)}
+                title={`Ver perfil de ${p.name}`}
+              >
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-night text-xl font-black text-white">
                   {p.name.slice(0, 1).toUpperCase()}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-bold">{p.name}{p.beginner ? ' · 🌱 Principiante' : ''}</p>
                   <p className="truncate text-sm text-slate-600">{p.zone}{p.bio ? ` · ${p.bio}` : ''}</p>
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -65,10 +76,18 @@ export default function Search({ profiles, meId }: { profiles: Profile[]; meId: 
                   </div>
                   {p.availability.length > 0 && <p className="mt-1 text-xs text-slate-500">Disponible: {p.availability.join(', ')}</p>}
                 </div>
-              </div>
+                <span className="shrink-0 text-lg text-slate-400">›</span>
+              </button>
             </Card>
           ))}
         </div>
+      )}
+      {viewProfile && (
+        <PublicProfile
+          profile={viewProfile}
+          posts={posts.filter((post) => post.profile_id === viewProfile.id)}
+          onClose={() => setViewProfile(null)}
+        />
       )}
     </div>
   )

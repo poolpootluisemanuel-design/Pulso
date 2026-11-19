@@ -123,6 +123,7 @@ export default function Community({ profile, posts, businesses, onRefresh, guest
         <PublicProfile
           profile={viewProfile}
           posts={posts.filter((p) => p.profile_id === viewProfile.id)}
+          title={viewProfile.id === profile.id ? 'Tu perfil · así te ven los demás' : undefined}
           onClose={() => setViewProfile(null)}
         />
       )}

@@ -441,7 +441,7 @@ export default function App() {
             </div>
             {comunidadView === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} gpsActive={activity.gps?.active === true} onMapImmersiveChange={setMapImmersive} />}
             {comunidadView === 'feed' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
-            {comunidadView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} />}
+            {comunidadView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} posts={posts} />}
           </div>
         )}
         {tab === 'explorar' && (
