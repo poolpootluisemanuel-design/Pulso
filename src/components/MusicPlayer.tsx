@@ -22,9 +22,16 @@
 //   (también en Entrenar); solo se expande a una hoja baja (40vh) con
 //   el video en miniatura cuando Luis la abre, y se recoge sola al
 //   cambiar de pestaña. El audio sigue sonando al recogerla.
-// - Segundo plano: con pantalla encendida (Wake Lock) la música sigue;
-//   con pantalla apagada hace falta YouTube Premium ("Abrir en YouTube").
-//   La música local (<audio> + Media Session) aguanta mejor.
+// - Segundo plano (app nativa): mientras suena, el plugin
+//   PulsoAudio mantiene un servicio en primer plano ("PULSO ·
+//   Sonando") para que el audio siga al salir de la app o con la
+//   pantalla apagada. YouTube con pantalla apagada puede pausarse
+//   igual (límite del embed): para mayor seguridad, "Abrir en
+//   YouTube" con Premium. En web no hay servicio: el navegador
+//   pausa el audio al bloquear la pantalla.
+// - "Abrir en YouTube" usa el plugin @capacitor/browser: window.open
+//   con '_blank' se ignora en la WebView de Capacitor y el botón no
+//   abría nada (ver lib/openExternal.ts).
 import { useEffect, useRef, useState } from 'react'
 import { getMusicPref, saveMusicPref } from '../lib/store'
 import {
@@ -39,6 +46,8 @@ import {
   type DeviceSong,
 } from '../lib/deviceMusic'
 import { Btn, Field, inputCls } from './ui'
+import { startAudioService, stopAudioService } from '../lib/audioService'
+import { openExternalUrl } from '../lib/openExternal'
 
 // Videos reales de YouTube por deporte (mixes largos, públicos).
 // Verificados 2026-11-16 con yt-dlp: playable_in_embed=True, oEmbed 200.
@@ -58,10 +67,15 @@ interface LocalTrack { name: string; url: string; durationMs?: number }
 
 // Extrae de un link de YouTube: {kind:'playlist', id} o {kind:'video', id}.
 // Acepta watch?v=, youtu.be/, /embed/, /shorts/, music.youtube.com y &list=.
+// También acepta el ID de una playlist pegado suelto (PL…, UU…, OLAK…,
+// RD…, LM…) y el list= dentro del fragmento (#list=…): antes esos dos
+// casos no se reconocían y la playlist no se abría.
 export function parseYouTubeUrl(url: string): { kind: 'playlist' | 'video'; id: string } | null {
   const u = url.trim()
   if (!u) return null
-  const list = u.match(/[?&]list=([A-Za-z0-9_-]+)/)
+  // ID de playlist pegado suelto, sin link completo.
+  if (/^(PL|UU|OLAK|RD|LM)[A-Za-z0-9_-]{6,}$/.test(u)) return { kind: 'playlist', id: u }
+  const list = u.match(/[?&#]list=([A-Za-z0-9_-]+)/)
   if (list) return { kind: 'playlist', id: list[1] }
   const v = u.match(/[?&]v=([A-Za-z0-9_-]{6,})/)
   if (v) return { kind: 'video', id: v[1] }
@@ -374,6 +388,19 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     }
   }, [anyPlaying, keepScreenOn])
 
+  // Música en segundo plano (solo app nativa): mientras suena, se
+  // mantiene el servicio en primer plano "PULSO · Sonando" para que
+  // Android no duerma la WebView al salir de la app o apagar la
+  // pantalla. Al pausar, el servicio se para. ANTES no había servicio
+  // y la música se cortaba al salir de la app: el Wake Lock solo
+  // funciona con la pantalla encendida y la app visible.
+  useEffect(() => {
+    if (!anyPlaying) { void stopAudioService(); return }
+    void startAudioService(statusTitle)
+    return () => { void stopAudioService() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyPlaying, statusTitle])
+
   // Media Session (YouTube).
   useEffect(() => {
     if (source !== 'youtube') return
@@ -611,7 +638,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           </div>
           <div className="mt-2 space-y-3">
           <p className="text-sm text-slate-600">
-            Sigue sonando al cambiar de pestaña. Con la pantalla apagada hace falta YouTube Premium: ábrela en YouTube con el botón de abajo.
+            Sigue sonando al cambiar de pestaña y al salir de la app: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando"). Con la pantalla apagada, la música local sigue; YouTube puede pausarse: para mayor seguridad ábrela en YouTube con Premium.
           </p>
 
           <div className="flex gap-2">
@@ -658,10 +685,21 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                 <Btn variant={playing ? 'ghost' : 'coral'} className="flex-1" onClick={() => setPlaying(!playing)}>
                   {playing ? '⏸ Pausa' : '▶ Reproducir'}
                 </Btn>
-                <Btn variant="teal" className="flex-1" onClick={() => window.open(externalUrl(preset, custom), '_blank', 'noopener,noreferrer')}>
+                {/* Abrir en YouTube con el plugin @capacitor/browser:
+                    ANTES era window.open(..., '_blank'), que la
+                    WebView de Capacitor ignora en silencio (no tiene
+                    onCreateWindow): el botón no abría nada y la
+                    playlist de Luis nunca salía. Ahora sí se abre su
+                    playlist tal como la pegó, con su lista completa. */}
+                <Btn variant="teal" className="flex-1" onClick={() => void openExternalUrl(externalUrl(preset, custom))}>
                   ▶ Abrir en YouTube
                 </Btn>
               </div>
+              {useCustom && (
+                <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
+                  Tu playlist guardada: {pref.customLabel || 'Mi playlist de YouTube'}. El botón de arriba abre esa lista en YouTube.
+                </p>
+              )}
 
               <Field label="Tu playlist de YouTube (opcional)">
                 <div className="flex gap-2">
@@ -731,7 +769,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   </div>
                   <p className="text-xs text-slate-500">
                     Se controla también desde la pantalla de bloqueo / notificaciones. {nativeMusic
-                      ? 'Con la pantalla apagada puede pausarse si Android duerme la app: para que suene seguro, mantén la pantalla encendida con el interruptor de abajo.'
+                      ? 'Con la pantalla apagada sigue sonando: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando").'
                       : 'Aguanta mejor en segundo plano que YouTube, pero si bloqueas la pantalla mucho tiempo el navegador puede pausarla: mantén la pantalla encendida con el interruptor de abajo.'}
                   </p>
                 </div>

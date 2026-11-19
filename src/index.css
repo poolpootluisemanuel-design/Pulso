@@ -23,17 +23,18 @@ input, select, textarea { font-size: 16px; }
 /* Navegación inferior: altura fija, con la barra de gestos abajo. */
 .pulso-nav { height: calc(var(--pulso-nav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
 /* Contenido: espacio libre para nav + música (+ barrita GPS si graba).
-   Mientras se graba, la barrita de GPS REEMPLAZA a la música, así que
-   el contenido solo reserva nav + GPS (antes reservaba nav + música
-   + GPS y quedaba un hueco). */
+   Mientras se graba, la barrita de GPS se APILA encima de la música
+   (antes la reemplazaba y eso desmontaba el reproductor: la música se
+   cortaba al cambiar de pestaña), así que el contenido reserva
+   nav + música + GPS. */
 .pulso-main { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 24px); }
-.pulso-main-gps { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 24px); }
+.pulso-main-gps { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 24px); }
 /* Muelle de música: siempre encima de la navegación, nunca sobre ella. */
 .pulso-music-dock { bottom: calc(var(--pulso-nav-h) + env(safe-area-inset-bottom, 0px)); }
-/* Botón flotante +: encima de nav + música (+ GPS si graba, sin
-   música porque la barrita de GPS la reemplaza). */
+/* Botón flotante +: encima de nav + música (+ GPS si graba, que ahora
+   se apila encima de la música en vez de reemplazarla). */
 .pulso-fab { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 16px); }
-.pulso-fab-gps { bottom: calc(var(--pulso-nav-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 16px); }
+.pulso-fab-gps { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 16px); }
 /* Hojas flotantes (tutorial / permisos): se anclan encima del muelle
    de música y dejan la navegación y la música visibles y sin tapar. */
 .pulso-sheet-bottom { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 12px); }

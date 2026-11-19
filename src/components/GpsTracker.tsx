@@ -142,7 +142,19 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   const [hcState, setHcState] = useState<'idle' | 'loading' | 'ok' | 'unavailable' | 'denied'>('idle')
   const [hcMsg, setHcMsg] = useState('')
   const lastPoint = useRef<Point | null>(null)
-  const lastFixAt = useRef<number>(0)
+  // Cuándo se fijó el ancla (último punto ACEPTADO): la velocidad
+  // implícita se mide desde el ancla, no desde la última lectura.
+  // ANTES se medía desde la última lectura (lastFixAt se actualizaba
+  // con CADA fix, también los descartados): caminando, cada fix queda
+  // a ~5 m del ancla pero llega ~1 s después del anterior, así que la
+  // "velocidad" salía 5 m/s o más y superaba el tope de Caminata
+  // (2.5 m/s), y TODOS los fixes se descartaban para siempre: los
+  // pasos subían (contador aparte) pero la distancia y el ritmo
+  // quedaban en 0. Midiendo desde el ancla, 10 m en 7 s son 1.4 m/s
+  // (caminar normal) y se acepta; un salto de deriva de 10 m en 1 s
+  // desde el ancla sigue rechazándose (10 m/s). Por eso el ancla solo
+  // se mueve al aceptar un fix, nunca al descartarlo.
+  const anchorAtRef = useRef<number>(0)
   // Ventana de 30 s para detectar parado: distancia real aceptada en ella.
   const stillWindowStart = useRef<number>(0)
   const stillWindowDistKm = useRef<number>(0)
@@ -361,11 +373,11 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   function handleFix(next: Point, accuracy: number) {
     const now = Date.now()
     const prev = lastPoint.current
-    if (!prev) { lastPoint.current = next; lastFixAt.current = now; return }
+    if (!prev) { lastPoint.current = next; anchorAtRef.current = now; return }
     const d = haversineKm(prev, next)
-    // Tiempo desde la última lectura válida: para la velocidad implícita.
-    const dtSec = Math.max(0.5, (now - lastFixAt.current) / 1000)
-    lastFixAt.current = now
+    // Tiempo desde que se fijó el ANCLA (último punto aceptado), no
+    // desde la última lectura: ver el comentario de anchorAtRef.
+    const dtSec = Math.max(0.5, (now - anchorAtRef.current) / 1000)
     if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
     // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
     // caminando. La deriva salta así; el movimiento real no.
@@ -398,7 +410,10 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
       const minMoveKm = accuracy > 15 ? 0.010 : 0.008
       if (d < minMoveKm) return
     }
+    // El ancla se mueve SOLO al aceptar el punto: aquí también se
+    // actualiza el tiempo del ancla (la velocidad se mide desde aquí).
     lastPoint.current = next
+    anchorAtRef.current = now
     stillWindowDistKm.current += d
     setCurrentPos(next)
     setDistanceKm((km) => km + d)
@@ -407,7 +422,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
 
   function startWatch(from: Point) {
     lastPoint.current = from
-    lastFixAt.current = Date.now()
+    anchorAtRef.current = Date.now()
     stillWindowStart.current = Date.now()
     stillWindowDistKm.current = 0
     setAutoPausedBoth(false)

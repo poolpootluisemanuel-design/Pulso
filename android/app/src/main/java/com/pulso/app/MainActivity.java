@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DeviceMusicPlugin.class);
         registerPlugin(PulsoPermissionsPlugin.class);
         registerPlugin(StepCounterPlugin.class);
+        registerPlugin(PulsoAudioPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

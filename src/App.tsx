@@ -478,15 +478,22 @@ export default function App() {
       </main>
 
       {/* Reproductor de música + barrita de GPS: UN SOLO contenedor
-          fijo. Mientras se graba con GPS, la barrita de GPS
-          REEMPLAZA a la mini-barra de música (no se suma): antes las
-          dos se apilaban y tapaban contenido. En Entrenar la música
-          sigue abajo como siempre, porque el GPS ya se ve en pantalla. */}
+          fijo. El reproductor vive SIEMPRE montado aquí (nunca se
+          desmonta al cambiar de pestaña): ANTES, mientras se grababa
+          con GPS, la barrita de GPS REEMPLAZABA a la mini-barra de
+          música al salir de Entrenar, así que MusicPlayer se
+          desmontaba, el reproductor de YouTube se destruía y el
+          <audio> local se paraba: la música se cortaba al cambiar de
+          pestaña. Ahora la barrita de GPS se APILA ENCIMA de la
+          mini-barra (el contenido reserva el espacio de las dos con
+          .pulso-main-gps) y la música sigue sonando. En Entrenar la
+          música sigue abajo como siempre, porque el GPS ya se ve en
+          pantalla. */}
       <div id="pulso-music" className="pulso-music-dock fixed left-0 right-0 z-20 mx-auto max-w-2xl px-3">
-        {tab !== 'entrenar' && activity.gps?.active ? (
+        {tab !== 'entrenar' && activity.gps?.active && (
           <button
             onClick={() => goTab('entrenar')}
-            className="flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"
+            className="mb-2 flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"
           >
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 animate-pulse rounded-full bg-pulso" />
@@ -494,16 +501,15 @@ export default function App() {
             </span>
             <span className="ml-auto shrink-0 text-teal">Volver →</span>
           </button>
-        ) : (
-          <MusicPlayer
-            profileId={profile.id}
-            compact={tab !== 'entrenar'}
-            expanded={musicExpanded}
-            onExpandedChange={setMusicExpanded}
-            onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
-            onGoTrain={() => goTab('entrenar')}
-          />
         )}
+        <MusicPlayer
+          profileId={profile.id}
+          compact={tab !== 'entrenar'}
+          expanded={musicExpanded}
+          onExpandedChange={setMusicExpanded}
+          onPlayingChange={(m) => setActivity((prev) => ({ ...prev, music: m }))}
+          onGoTrain={() => goTab('entrenar')}
+        />
       </div>
 
       {/* Botón flotante para crear sesión: SOLO en Sesiones (antes salía

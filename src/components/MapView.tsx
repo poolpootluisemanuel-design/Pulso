@@ -153,6 +153,29 @@ export default function MapView({
   const fittedRef = useRef<string>('')
   const [online, setOnline] = useState(() => navigator.onLine)
   const [is3d, setIs3d] = useState(false)
+  // Seguimiento en vivo: con follow, el mapa centra tu posición en
+  // cada fix GPS. ANTES el mapa "no se movía": en realidad los puntos
+  // nunca llegaban (la distancia se quedaba en 0 por el filtro de
+  // velocidad, ver GpsTracker), así que no había nada que seguir. Con
+  // los puntos fluyendo, el mapa sí se mueve. Además, si el usuario
+  // arrastra el mapa, el seguimiento se suelta (como en las apps de
+  // running) y sale el botón "📍 Seguirme" para volver a centrarte.
+  const [following, setFollowing] = useState(follow)
+  const followingRef = useRef(follow)
+  const prevFollowRef = useRef(follow)
+  function setFollowingBoth(v: boolean) {
+    followingRef.current = v
+    setFollowing(v)
+  }
+  // Si follow se vuelve a activar (nueva grabación), se retoma el
+  // seguimiento; si se apaga, se suelta.
+  useEffect(() => {
+    if (follow !== prevFollowRef.current) {
+      prevFollowRef.current = follow
+      setFollowingBoth(follow)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow])
   const [webglFailed, setWebglFailed] = useState(false)
   // Pérdida de contexto WebGL al apagar/encender la pantalla: Android
   // suspende la WebView y el canvas pierde su contexto. ANTES este
@@ -247,6 +270,11 @@ export default function MapView({
       setContextLost(false)
       try { map.resize() } catch { /* noop */ }
     })
+    // Si el usuario arrastra el mapa, se suelta el seguimiento en vivo
+    // (no tiene sentido pelear con su dedo): sale "📍 Seguirme" para
+    // volver a centrarte. El mapa sigue dibujando la ruta y el marcador
+    // "Estás aquí" aunque no te siga.
+    map.on('dragstart', () => setFollowingBoth(false))
     // Capas propias (ruta roja + guía teal): setStyle las borra, así
     // que se vuelven a poner en cada carga de estilo.
     const addRouteLayers = () => {
@@ -318,22 +346,39 @@ export default function MapView({
     }
   }, [])
 
-  // Ruta grabada + guía: se actualizan sin recrear el mapa. Con follow,
-  // el mapa sigue la última posición (la grabación en vivo).
+  // Ruta grabada + guía: se actualizan sin recrear el mapa. Con
+  // seguimiento activo, el mapa sigue la última posición (la
+  // grabación en vivo) en cada fix: el mapa se mueve contigo y la
+  // ruta se dibuja en tiempo real. Si el estilo aún no cargó (sin
+  // fuente 'route'), el centrado se hace igual: antes el efecto
+  // salía antes de tiempo y el mapa no se movía hasta el siguiente
+  // cambio de puntos.
+  const prevPointsLenRef = useRef(0)
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !map.getSource('route')) return
-    const src = map.getSource('route') as maplibregl.GeoJSONSource
-    src.setData(routeGeo(points && points.length >= 2 ? points : []))
-    const guide = map.getSource('guide') as maplibregl.GeoJSONSource
-    guide.setData(routeGeo(guidePoints && guidePoints.length >= 2 ? guidePoints : []))
-    if (follow && points && points.length > 0) {
+    if (!map) return
+    // Nueva grabación (puntos de 0 a >0): se retoma el seguimiento.
+    if (prevPointsLenRef.current === 0 && points && points.length > 0) setFollowingBoth(true)
+    prevPointsLenRef.current = points ? points.length : 0
+    if (map.getSource('route')) {
+      const src = map.getSource('route') as maplibregl.GeoJSONSource
+      src.setData(routeGeo(points && points.length >= 2 ? points : []))
+    }
+    if (map.getSource('guide')) {
+      const guide = map.getSource('guide') as maplibregl.GeoJSONSource
+      guide.setData(routeGeo(guidePoints && guidePoints.length >= 2 ? guidePoints : []))
+    }
+    if (followingRef.current && points && points.length > 0) {
       map.easeTo({ center: [points[points.length - 1].lng, points[points.length - 1].lat], duration: 400 })
-    } else if (guidePoints && guidePoints.length >= 2) {
+    } else if ((!points || points.length === 0) && guidePoints && guidePoints.length >= 2) {
+      // Solo al inicio (sin puntos grabados aún): encuadrar la guía.
+      // Si el usuario soltó el seguimiento, NO se reencuadra en cada
+      // fix: eso le quitaría el mapa de las manos.
       const lngs = guidePoints.map((p) => p.lng)
       const lats = guidePoints.map((p) => p.lat)
       map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 30, maxZoom: 15, duration: 400 })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points, guidePoints, follow])
 
   // "Volver a la ruta": centrar el mapa en el punto de la guía más
@@ -448,6 +493,23 @@ export default function MapView({
         <p className="pointer-events-none absolute bottom-2 left-2 z-10 rounded-full bg-night/80 px-2.5 py-1 text-[10px] font-bold text-white/80">
           {is3d ? 'Vista 3D · gira con dos dedos' : 'Toca 3D para inclinar el mapa'}
         </p>
+        {/* Seguimiento soltado al arrastrar: botón para volver a
+            centrarte en tu posición en vivo. */}
+        {follow && points && points.length > 0 && !following && (
+          <button
+            type="button"
+            onClick={() => {
+              const map = mapRef.current
+              const last = points[points.length - 1]
+              setFollowingBoth(true)
+              if (map && last) map.easeTo({ center: [last.lng, last.lat], zoom: 16, duration: 600 })
+            }}
+            aria-label="Volver a seguir mi posición"
+            className="absolute bottom-2 right-2 z-10 rounded-full bg-pulso px-3 py-1.5 text-xs font-black text-night shadow-lg"
+          >
+            📍 Seguirme
+          </button>
+        )}
       </div>
     </div>
   )

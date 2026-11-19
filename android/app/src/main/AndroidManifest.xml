@@ -33,6 +33,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Música en segundo plano: el servicio en primer plano
+             (tipo mediaPlayback) mantiene el proceso vivo mientras
+             suena la música, para que no se corte al salir de la app
+             o al apagar la pantalla. Lo arranca/para el plugin
+             PulsoAudio (ver AudioForegroundService.java). -->
+        <service
+            android:name=".AudioForegroundService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->
@@ -63,4 +73,10 @@
          Se pide en el flujo de permisos (plugin PulsoPermissions);
          en Android 12 o menos no hace falta pedirlo. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Música en segundo plano: el servicio en primer plano de audio
+         (plugin PulsoAudio). Son permisos normales, sin diálogo en
+         tiempo de ejecución. El permiso de ubicación en segundo plano
+         (FOREGROUND_SERVICE_LOCATION) lo declara el plugin de GPS. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 </manifest>

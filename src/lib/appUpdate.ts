@@ -15,7 +15,7 @@
 //    (ese archivo se lee en remoto, no hace falta recompilar).
 // El version.json que viaja DENTRO del APK no se usa para comparar:
 // la comparación siempre lee el remoto de GitHub.
-export const APP_BUILD = 21 // Build 21: modo invitado (vista previa sin cuenta).
+export const APP_BUILD = 22 // Build 22: distancia/ritmo GPS, música sin cortes, mapa que sigue.
 
 export interface RemoteVersion {
   versionCode: number
