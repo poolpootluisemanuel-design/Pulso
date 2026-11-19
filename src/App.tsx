@@ -337,6 +337,11 @@ export default function App() {
       {/* Encabezado claro (paleta cálida 2026-11-18): logo PULSO, avatar.
           Sin campana: el punto rojo era falso (se prendía con cualquier
           publicación, no con algo nuevo para ti). */}
+      {/* Encabezado: se esconde mientras el mapa inmersivo está
+          abierto; en el teléfono se asomaba una franja del encabezado
+          por encima del mapa. La pastilla flotante del mapa (← Lista
+          + título + Crear) ya cubre esa navegación. */}
+      {!mapImmersive && (
       <header className="pulso-header sticky top-0 z-10 border-b border-[#F2DCC6] bg-[#FFF9F0]/95 px-4 pb-3 text-night shadow-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2">
@@ -363,6 +368,7 @@ export default function App() {
           </div>
         </div>
       </header>
+      )}
 
       {/* Aviso de modo invitado: visible en todas las pantallas,
           con el botón para crear cuenta siempre a la mano. */}
