@@ -2,6 +2,7 @@ import type { Profile, SessionItem, Workout } from '../lib/types'
 import { formatDate, weekdayName } from '../lib/utils'
 import { Card, Empty, Tag } from './ui'
 import TodaySteps from './TodaySteps'
+import { IconPlay } from './icons'
 
 // Foto libre (Unsplash, verificada 200): deporte / atletismo.
 const HERO_IMG = 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=1200&q=80&auto=format&fit=crop'
@@ -15,7 +16,7 @@ function sportEmoji(sport: string) {
   return SPORT_EMOJI[key] || '🏅'
 }
 
-export default function Home({ profile, sessions, workouts, onGoSessions }: { profile: Profile; sessions: SessionItem[]; workouts: Workout[]; onGoSessions: () => void }) {
+export default function Home({ profile, sessions, workouts, onGoSessions, onGoTrain }: { profile: Profile; sessions: SessionItem[]; workouts: Workout[]; onGoSessions: () => void; onGoTrain: () => void }) {
   const today = new Date().toISOString().slice(0, 10)
   const upcoming = sessions.filter((s) => s.date >= today).slice(0, 3)
   const next = upcoming[0]
@@ -67,6 +68,12 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         </div>
       </div>
 
+      {/* Entrenar: botón destacado. Ya no es pestaña, pero entrenar
+          sigue aquí, a un toque, con GPS, caminata, correr y ciclismo. */}
+      <button onClick={onGoTrain} className="pulso-press flex w-full items-center justify-center gap-2 rounded-3xl bg-pulso py-4 text-lg font-black text-night shadow-lg shadow-pulso/40">
+        <IconPlay className="h-6 w-6" /> Entrenar con GPS
+      </button>
+
       {/* Pasos hoy (contador del sistema) + entrenamientos.
           La racha ya NO vive aquí: solo en Retos. */}
       <TodaySteps />
@@ -100,7 +107,7 @@ export default function Home({ profile, sessions, workouts, onGoSessions }: { pr
         <button className="text-sm font-bold text-pulso-dark" onClick={onGoSessions}>Ver todas →</button>
       </div>
       {upcoming.length === 0 ? (
-        <Empty text="No hay sesiones próximas. Crea la primera en la pestaña Sesiones." />
+        <Empty text="No hay sesiones próximas. Crea la primera en la pestaña Comunidad." />
       ) : (
         upcoming.map((s) => (
           <Card key={s.id}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import Logo from './components/Logo'
 import Auth from './components/Auth'
 import Challenges from './components/Challenges'
@@ -19,7 +19,7 @@ import { isNative } from './lib/native'
 import type { TrainActivity } from './components/Train'
 import AdminPanel from './components/AdminPanel'
 import Businesses from './components/Businesses'
-import MoreMenu, { type MoreOption } from './components/MoreMenu'
+import { IconCompass, IconHome, IconUser, IconUsers } from './components/icons'
 import UpdatePrompt from './components/UpdatePrompt'
 import GuestGate from './components/GuestGate'
 import { enterGuestMode, exitGuestMode, isGuestMode, GUEST_PROFILE } from './lib/guest'
@@ -29,15 +29,16 @@ import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout
 import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
 
-type Tab = 'inicio' | 'sesiones' | 'rutas' | 'entrenar' | 'retos' | 'mas'
+// Navegación principal: 4 destinos. 'entrenar' sigue existiendo
+// como estado interno (Entrenar se mantiene montado y se abre desde
+// el botón destacado de Inicio), pero NO es una pestaña visible.
+type Tab = 'inicio' | 'comunidad' | 'explorar' | 'perfil' | 'entrenar'
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'inicio', label: 'Inicio', icon: '🏠' },
-  { id: 'sesiones', label: 'Sesiones', icon: '📅' },
-  { id: 'rutas', label: 'Rutas', icon: '🗺️' },
-  { id: 'entrenar', label: 'Entrenar', icon: '🏃' },
-  { id: 'retos', label: 'Retos', icon: '🏅' },
-  { id: 'mas', label: 'Más', icon: '⋯' },
+const NAV_TABS: { id: Exclude<Tab, 'entrenar'>; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { id: 'inicio', label: 'Inicio', icon: IconHome },
+  { id: 'comunidad', label: 'Comunidad', icon: IconUsers },
+  { id: 'explorar', label: 'Explorar', icon: IconCompass },
+  { id: 'perfil', label: 'Perfil', icon: IconUser },
 ]
 
 export default function App() {
@@ -97,12 +98,19 @@ export default function App() {
   // pastilla flotante). El encabezado y la navegación no se tocan: el
   // contenedor inmersivo es fixed y los tapa solo mientras está abierto.
   const [mapImmersive, setMapImmersive] = useState(false)
-  // Menú "Más" (5ª pestaña): qué vista muestra dentro de Más.
-  // 'menu' es la lista (Buscar, Comunidad, Negocios, Música, Perfil,
-  // Soy coach, Administración). Al salir de Más se vuelve al menú.
-  const [moreView, setMoreView] = useState<MoreOption | 'menu'>('menu')
+  // Sub-vistas dentro de cada pestaña (sin crear más pestañas):
+  // Comunidad: sesiones (principal), publicaciones y buscar.
+  // Explorar: rutas con mapa (principal), negocios y coaches.
+  // Perfil: perfil o administración (solo admin). Al entrar a una
+  // pestaña se vuelve a su vista principal, como antes hacía Más
+  // con su menú.
+  const [comunidadView, setComunidadView] = useState<'sesiones' | 'feed' | 'buscar'>('sesiones')
+  const [explorarView, setExplorarView] = useState<'rutas' | 'negocios' | 'coaches'>('rutas')
+  const [perfilView, setPerfilView] = useState<'perfil' | 'admin'>('perfil')
   function goTab(t: Tab) {
-    if (t === 'mas') setMoreView('menu')
+    if (t === 'comunidad') setComunidadView('sesiones')
+    if (t === 'explorar') setExplorarView('rutas')
+    if (t === 'perfil') setPerfilView('perfil')
     setTab(t)
   }
   // Entrar como invitado desde la pantalla de acceso: se guarda la
@@ -362,7 +370,7 @@ export default function App() {
                 Crear cuenta
               </button>
             ) : (
-              <button onClick={() => { setMoreView('perfil'); setTab('mas') }} aria-label="Mi perfil"
+              <button onClick={() => goTab('perfil')} aria-label="Mi perfil"
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-pulso text-base font-black text-night">
                 {profile.name.slice(0, 1).toUpperCase()}
               </button>
@@ -418,9 +426,36 @@ export default function App() {
       )}
 
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
-        {tab === 'inicio' && <div className="pulso-tab-in"><Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} /></div>}
-        {tab === 'sesiones' && <div className="pulso-tab-in"><SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} gpsActive={activity.gps?.active === true} onMapImmersiveChange={setMapImmersive} /></div>}
-        {tab === 'rutas' && <div className="pulso-tab-in"><RoutesTab profile={profile} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} /></div>}
+        {tab === 'inicio' && (
+          <div className="pulso-tab-in space-y-4">
+            <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('comunidad')} onGoTrain={() => goTab('entrenar')} />
+            <Challenges workouts={workouts} challenges={challenges} businesses={businesses} />
+          </div>
+        )}
+        {tab === 'comunidad' && (
+          <div className="pulso-tab-in">
+            <div className="mb-3 flex gap-2">
+              <button onClick={() => setComunidadView('sesiones')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${comunidadView === 'sesiones' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Sesiones</button>
+              <button onClick={() => setComunidadView('feed')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${comunidadView === 'feed' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Publicaciones</button>
+              <button onClick={() => setComunidadView('buscar')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${comunidadView === 'buscar' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Buscar</button>
+            </div>
+            {comunidadView === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} gpsActive={activity.gps?.active === true} onMapImmersiveChange={setMapImmersive} />}
+            {comunidadView === 'feed' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
+            {comunidadView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} />}
+          </div>
+        )}
+        {tab === 'explorar' && (
+          <div className="pulso-tab-in">
+            <div className="mb-3 flex gap-2">
+              <button onClick={() => setExplorarView('rutas')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${explorarView === 'rutas' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Rutas</button>
+              <button onClick={() => setExplorarView('negocios')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${explorarView === 'negocios' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Negocios</button>
+              <button onClick={() => setExplorarView('coaches')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${explorarView === 'coaches' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Coaches</button>
+            </div>
+            {explorarView === 'rutas' && <RoutesTab profile={profile} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
+            {explorarView === 'negocios' && <Businesses businesses={businesses} />}
+            {explorarView === 'coaches' && <CoachPanel profile={profile} onCreateSession={() => { setCreateSignal((n) => n + 1); goTab('comunidad') }} />}
+          </div>
+        )}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
@@ -443,7 +478,7 @@ export default function App() {
                   <button onClick={goCreateAccount} className="w-full rounded-2xl bg-pulso py-3 text-base font-black text-night">
                     Crear mi cuenta gratis
                   </button>
-                  <button onClick={() => goTab('sesiones')} className="w-full py-2 text-sm font-bold text-teal-dark underline">
+                  <button onClick={() => goTab('comunidad')} className="w-full py-2 text-sm font-bold text-teal-dark underline">
                     Ver sesiones
                   </button>
                 </div>
@@ -455,38 +490,29 @@ export default function App() {
             <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
           </div>
         )}
-        {tab === 'retos' && <div className="pulso-tab-in"><Challenges workouts={workouts} challenges={challenges} businesses={businesses} /></div>}
-        {/* Menú Más: Buscar, Comunidad, Negocios, Música, Perfil,
-            Soy coach y Administración ya no son pestañas fijas. */}
-        {tab === 'mas' && (
+        {tab === 'perfil' && (
           <div className="pulso-tab-in">
-            {moreView !== 'menu' && (
-              <button onClick={() => setMoreView('menu')} className="mb-3 text-sm font-bold text-pulso-dark">← Más</button>
-            )}
-            {moreView === 'menu' && (
-              <MoreMenu
-                isAdmin={admin}
-                guest={guest}
-                onCreateAccount={goCreateAccount}
-                onSelect={(opt) => {
-                  // Música: no es una vista, abre el reproductor
-                  // persistente (hoja inferior) y se queda en el menú.
-                  if (opt === 'musica') { setMusicExpanded(true); return }
-                  setMoreView(opt)
-                }}
-              />
-            )}
-            {moreView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} />}
-            {moreView === 'comunidad' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
-            {moreView === 'negocios' && <Businesses businesses={businesses} />}
-            {moreView === 'perfil' && user && (
-              <ProfileTab user={user} profile={profile} posts={posts} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} onGoAdmin={() => setMoreView('admin')} />
-            )}
-            {moreView === 'coach' && (
-              <CoachPanel profile={profile} onCreateSession={() => { setCreateSignal((n) => n + 1); goTab('sesiones') }} />
-            )}
-            {moreView === 'admin' && admin && user && (
-              <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
+            {perfilView === 'admin' && admin && user ? (
+              <>
+                <button onClick={() => setPerfilView('perfil')} className="mb-3 text-sm font-bold text-pulso-dark">← Perfil</button>
+                <AdminPanel profiles={profiles} sessions={sessions} posts={posts} businesses={businesses} allWorkouts={allWorkouts} dbAdmin={profile.is_admin === true} onRefresh={loadAll} adminUser={user} adminProfile={profile} currentUserId={user.id} />
+              </>
+            ) : !user ? (
+              <div className="space-y-4">
+                <h2 className="text-2xl font-black text-teal-dark">Perfil</h2>
+                <div className="rounded-3xl bg-white p-5 text-center shadow-md">
+                  <p className="text-4xl">👤</p>
+                  <p className="mt-2 text-lg font-black text-night">Tu perfil necesita cuenta</p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                    Crea tu cuenta gratis para ver tus datos, tus deportes y tus publicaciones.
+                  </p>
+                  <button onClick={goCreateAccount} className="mt-4 w-full rounded-2xl bg-pulso py-3 text-base font-black text-night">
+                    Crear mi cuenta gratis
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <ProfileTab user={user} profile={profile} posts={posts} onRefresh={loadAll} onSignOut={() => { setUser(null); setProfile(null) }} onShowTutorial={() => setShowTutorial(true)} onShowPermissions={() => setShowPermissions(true)} onGoAdmin={() => setPerfilView('admin')} />
             )}
           </div>
         )}
@@ -531,12 +557,13 @@ export default function App() {
         />
       </div>
 
-      {/* Botón flotante para crear sesión: SOLO en Sesiones (antes salía
-          en todas las pestañas y nadie sabía qué creaba el "+"). Con
-          etiqueta "Crear" y texto oscuro sobre rosa. Se esconde en
-          Entrenar, cuando la hoja de música está expandida y en modo
-          invitado (crear sesión necesita cuenta). */}
-      {tab === 'sesiones' && !musicExpanded && !guest && !mapImmersive && (
+      {/* Botón flotante para crear sesión: SOLO en Comunidad →
+          Sesiones (antes salía en todas las pestañas y nadie sabía
+          qué creaba el "+"). Con etiqueta "Crear" y texto oscuro
+          sobre rosa. Se esconde en Entrenar, cuando la hoja de música
+          está expandida y en modo invitado (crear sesión necesita
+          cuenta). */}
+      {tab === 'comunidad' && comunidadView === 'sesiones' && !musicExpanded && !guest && !mapImmersive && (
         <button onClick={() => setCreateSignal((n) => n + 1)} aria-label="Crear sesión"
           className={`pulso-fab pulso-press fixed right-4 z-20 flex h-14 items-center gap-1 rounded-full bg-pulso px-5 text-base font-black text-night shadow-xl shadow-pulso/40 ${activity.gps?.active ? 'pulso-fab-gps' : ''}`}>
           <span className="text-2xl leading-none">+</span> Crear
@@ -545,18 +572,21 @@ export default function App() {
 
       <nav className="pulso-nav fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white shadow-[0_-4px_20px_rgba(10,27,46,0.08)]">
         <div className="mx-auto flex h-full max-w-2xl">
-          {TABS.map((t) => (
-            <button key={t.id} onClick={() => goTab(t.id)} className={`pulso-press flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
-              {/* Entrenar es la pestaña central: círculo rosa para que
-                  se vea como el botón principal de la app. */}
-              <span className={`flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none ${t.id === 'entrenar' ? 'bg-pulso text-night shadow-md shadow-pulso/40' : ''}`}>{t.icon}</span>
-              {t.label}
-              {/* El indicador ocupa siempre su sitio (transparente si
-                  no es la pestaña activa): antes solo existía en la
-                  activa y la altura de la navegación cambiaba. */}
-              <span className={`mt-1 h-1 w-6 rounded-full ${tab === t.id ? 'bg-pulso-dark' : 'bg-transparent'}`} />
-            </button>
-          ))}
+          {NAV_TABS.map((t) => {
+            const Icon = t.icon
+            return (
+              <button key={t.id} onClick={() => goTab(t.id)} className={`pulso-press flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
+                <span className="flex h-9 w-9 items-center justify-center leading-none">
+                  <Icon className="h-6 w-6" />
+                </span>
+                {t.label}
+                {/* El indicador ocupa siempre su sitio (transparente si
+                    no es la pestaña activa): antes solo existía en la
+                    activa y la altura de la navegación cambiaba. */}
+                <span className={`mt-1 h-1 w-6 rounded-full ${tab === t.id ? 'bg-pulso-dark' : 'bg-transparent'}`} />
+              </button>
+            )
+          })}
         </div>
       </nav>
 
