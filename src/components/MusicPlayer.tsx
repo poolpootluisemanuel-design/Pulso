@@ -46,8 +46,8 @@ import {
   type DeviceSong,
 } from '../lib/deviceMusic'
 import { Btn, Field, inputCls } from './ui'
-import { startAudioService, stopAudioService, updateMedia, addMediaControlListener } from '../lib/audioService'
-import type { MediaControlAction } from '../lib/audioService'
+import { startAudioService, stopAudioService, updateMedia, addMediaControlListener, audioServiceSupported, playNativeUrl, pauseNative, seekNative, getNativePosition, addPlayerEventListener } from '../lib/audioService'
+import type { MediaControlAction, PlayerEventType } from '../lib/audioService'
 import { listPlaylist, resolveVideo, ytThumbnail, type ExtractorTrack } from '../lib/youtubeExtractor'
 import { openExternalUrl } from '../lib/openExternal'
 
@@ -65,7 +65,7 @@ export const MUSIC_PRESETS: Preset[] = [
   { id: 'general', label: 'General', emoji: '🎵', query: 'música para entrenar motivación', videoId: 'a-EkjVGqXtY' },
 ]
 
-interface LocalTrack { name: string; url: string; durationMs?: number }
+interface LocalTrack { name: string; url: string; durationMs?: number; nativeUri?: string }
 
 // Extrae de un link de YouTube: {kind:'playlist', id} o {kind:'video', id}.
 // Acepta watch?v=, youtu.be/, /embed/, /shorts/, music.youtube.com y &list=.
@@ -266,6 +266,10 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // teléfono leídas con MediaStore, sin elegirlas una por una.
   // En web nativeMusic es false y no se muestra nada de esto.
   const nativeMusic = deviceMusicSupported()
+  // Reproductor NATIVO (ExoPlayer) en la app instalada: el audio sale
+  // del WebView y no se corta al salir ni al apagar la pantalla. En
+  // web (vista previa) sigue el <audio> de siempre.
+  const useNativePlayer = audioServiceSupported()
   const [deviceSongs, setDeviceSongs] = useState<DeviceSong[]>(() => loadCachedDeviceSongs(profileId))
   const [deviceLoaded, setDeviceLoaded] = useState(false)
   const [deviceLoading, setDeviceLoading] = useState(false)
@@ -277,6 +281,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       name: song.artist ? `${song.title} — ${song.artist}` : song.title,
       url: deviceSongUrl(song),
       durationMs: song.durationMs,
+      // URI cruda para el reproductor nativo (ExoPlayer la abre
+      // directo; la WebView necesita el convertFileSrc de arriba).
+      nativeUri: song.uri,
     }
   }
 
@@ -352,6 +359,15 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const statusTitle = source === 'local' && currentLocal
     ? cleanTrackName(currentLocal.name)
     : ytExtractorActive && ytCurrent ? ytCurrent.title : title
+
+  // ¿La canción actual suena por el reproductor NATIVO? (ref para
+  // los handlers del <audio>: en nativo el elemento no debe sonar
+  // nunca, ni siquiera al cargar el src por onCanPlay, o sonarían
+  // las dos fuentes juntas).
+  const nativeAudioRef = useRef(false)
+  useEffect(() => {
+    nativeAudioRef.current = useNativePlayer && ((source === 'local' && !!currentLocal?.nativeUri) || ytExtractorActive)
+  }, [useNativePlayer, source, currentLocal, ytExtractorActive])
   const playingTitle = `PULSO — ${statusTitle}`
   // Título CORTO para la mini-barra: el título completo ("Música para
   // correr…") se cortaba como "Músic…" porque no cabe junto al play,
@@ -521,11 +537,14 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // y la música se cortaba al salir de la app: el Wake Lock solo
   // funciona con la pantalla encendida y la app visible.
   useEffect(() => {
+    // En la app nativa el servicio lo maneja el reproductor
+    // (playNativeUrl / pauseNative); aquí no se toca.
+    if (useNativePlayer) return
     if (!anyPlaying) { void stopAudioService(); return }
     void startAudioService(statusTitle)
     return () => { void stopAudioService() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyPlaying, statusTitle])
+  }, [anyPlaying, statusTitle, useNativePlayer])
 
   // Sesión de medios NATIVA (pantalla de bloqueo / ajustes rápidos):
   // título, artista y estado del audio y del servicio. Sin esto el
@@ -566,8 +585,60 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     return () => { cancelled = true; void handle?.remove() }
   }, [])
 
+  // Barrita de minutos con el reproductor nativo: la posición se
+  // pregunta cada medio segundo (el <audio> no suena en nativo y su
+  // onTimeUpdate no dispara). Sirve para local y para YouTube.
+  useEffect(() => {
+    if (!useNativePlayer || !anyPlaying) return
+    const id = window.setInterval(() => {
+      void getNativePosition().then((p) => {
+        if (!p) return
+        setYtTime({ current: p.positionMs / 1000, duration: p.durationMs > 0 ? p.durationMs / 1000 : 0 })
+      })
+    }, 500)
+    return () => window.clearInterval(id)
+  }, [anyPlaying, useNativePlayer])
+
+  // El reproductor nativo avisa cuando termina la canción o falla:
+  // avanzar la cola igual que el onEnded del <audio>, o caer al
+  // embed si el extractor falló. El handler vive en un ref para no
+  // re-suscribirse con valores desfasados.
+  const playerEventRef = useRef<(ev: { type: PlayerEventType; message?: string }) => void>(() => undefined)
+  useEffect(() => {
+    playerEventRef.current = (ev: { type: PlayerEventType; message?: string }) => {
+      if (ev.type === 'ended') {
+        if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor' && ytQueue.length > 1) {
+          setYtQueueIndex((i) => (i + 1) % ytQueue.length)
+          setYtAudioUrl(null)
+          ytResolvedForRef.current = null
+        } else if (sourceRef.current === 'local' && localTracks.length > 1) {
+          playLocal((localIndex + 1) % localTracks.length)
+        }
+      } else if (ev.type === 'error') {
+        if (sourceRef.current === 'youtube' && ytModeRef.current === 'extractor') {
+          fallbackToEmbed('El reproductor no pudo sonar este audio. Suena el video embebido como antes; toca "Probar de nuevo" para reintentarlo.')
+        } else {
+          setLocalPlaying(false)
+        }
+      }
+    }
+  })
+  useEffect(() => {
+    if (!useNativePlayer) return
+    let handle: { remove: () => Promise<void> } | null = null
+    let cancelled = false
+    void addPlayerEventListener((ev) => { playerEventRef.current(ev) }).then((h) => {
+      if (cancelled) { void h?.remove(); return }
+      handle = h
+    })
+    return () => { cancelled = true; void handle?.remove() }
+  }, [useNativePlayer])
+
   // Media Session (YouTube, modo embed).
   useEffect(() => {
+    // En la app nativa manda la sesión NATIVA (PulsoAudioPlugin):
+    // la de la WebView no genera notificación del sistema.
+    if (useNativePlayer) return
     if (source !== 'youtube' || ytMode !== 'embed') return
     const ms = navigator.mediaSession
     if (!ms) return
@@ -648,6 +719,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // Media Session (extractor): la cola suena por <audio>; la pantalla
   // de bloqueo muestra la canción actual con su foto y los controles.
   useEffect(() => {
+    if (useNativePlayer) return
     if (!ytExtractorActive) return
     const ms = navigator.mediaSession
     if (!ms) return
@@ -689,6 +761,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // no), así la pantalla de bloqueo siempre responde. Solo se
   // limpian cuando no hay canción o se cambia a YouTube.
   useEffect(() => {
+    if (useNativePlayer) return
     if (source !== 'local') return
     const ms = navigator.mediaSession
     if (!ms) return
@@ -915,12 +988,20 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     setPlaying(true)
   }
 
-  /** Adelantar en la canción del extractor (barrita de minutos). */
+  /** Adelantar en la canción que suena (barrita de minutos). */
   function seekYt(frac: number) {
-    const audio = audioRef.current
     const total = ytTime.duration
-    if (!audio || !total) return
+      || (source === 'local' && currentLocal?.durationMs ? currentLocal.durationMs / 1000 : 0)
+      || (ytExtractorActive && ytCurrent?.durationSec ? ytCurrent.durationSec : 0)
+    if (!total) return
     const t = Math.min(1, Math.max(0, frac)) * total
+    if (useNativePlayer) {
+      void seekNative(Math.round(t * 1000))
+      setYtTime((prev) => ({ ...prev, current: t }))
+      return
+    }
+    const audio = audioRef.current
+    if (!audio) return
     audio.currentTime = t
     setYtTime((prev) => ({ ...prev, current: t }))
   }
@@ -941,11 +1022,32 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   // mini-barra mostraba "En pausa · YouTube" mientras sonaba la música
   // local, y al darle play a YouTube sonaban las dos juntas. Ahora
   // cualquier estado en el que no toca sonar pausa el elemento.
+  // EN LA APP NATIVA el motor es ExoPlayer (playNativeUrl): el
+  // <audio> solo queda para las canciones locales sin URI nativa
+  // (archivo elegido a mano, blob:) y para la vista previa web.
   useEffect(() => {
     const audio = audioRef.current
-    if (!audio) return
     const shouldPlayLocal = source === 'local' && localPlaying && currentLocal
     const shouldPlayYt = ytExtractorActive && playing && ytAudioUrl
+    if (useNativePlayer) {
+      const localNativeUrl = currentLocal?.nativeUri
+      if (source === 'local' && localPlaying && currentLocal && localNativeUrl) {
+        audio?.pause()
+        void playNativeUrl(localNativeUrl, cleanTrackName(currentLocal.name), 'PULSO · Música local')
+      } else if (ytExtractorActive && playing && ytAudioUrl && ytCurrent) {
+        audio?.pause()
+        void playNativeUrl(ytAudioUrl, ytCurrent.title, 'PULSO')
+      } else if (shouldPlayLocal && audio) {
+        // Sin URI nativa (blob: de archivo elegido): <audio> web.
+        void pauseNative()
+        if (audio.readyState >= 2) void audio.play().catch(() => undefined)
+      } else {
+        void pauseNative()
+        audio?.pause()
+      }
+      return
+    }
+    if (!audio) return
     if (shouldPlayLocal || shouldPlayYt) {
       if (audio.readyState >= 2 && !audio.paused) return
       if (audio.readyState >= 2) void audio.play().catch(() => undefined)
@@ -1300,6 +1402,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   <p className="text-xs text-slate-500">
                     {localIndex + 1} de {localTracks.length} · {localPlaying ? 'Sonando…' : 'En pausa'}
                   </p>
+                  {useNativePlayer && currentLocal?.nativeUri && (
+                    <SeekBar current={ytTime.current} total={ytTime.duration || (currentLocal.durationMs ? currentLocal.durationMs / 1000 : 0)} onSeek={seekYt} />
+                  )}
                   <div className="flex gap-2">
                     <Btn variant="ghost" className="flex-1" onClick={() => playLocal((localIndex - 1 + localTracks.length) % localTracks.length)} disabled={localTracks.length < 2}>⏮ Anterior</Btn>
                     <Btn variant={localPlaying ? 'ghost' : 'coral'} className="flex-1" onClick={() => setLocalPlaying(!localPlaying)}>
@@ -1374,11 +1479,15 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           barrita de minutos es la de arriba). */}
       <audio
         ref={audioRef}
-        className={expanded && source === 'local' && currentLocal ? 'mt-3 w-full' : 'hidden'}
+        className={expanded && source === 'local' && currentLocal && (!useNativePlayer || !currentLocal.nativeUri) ? 'mt-3 w-full' : 'hidden'}
         controls
         preload="metadata"
         src={source === 'local' ? currentLocal?.url : ytExtractorActive ? ytAudioUrl ?? undefined : undefined}
         onCanPlay={() => {
+          // En nativo el <audio> NO suena (el motor es ExoPlayer):
+          // sin este freno, al cargar el src el elemento arrancaría
+          // solo y sonaría junto al nativo.
+          if (nativeAudioRef.current) return
           const audio = audioRef.current
           if (!audio || !audio.paused) return
           if (sourceRef.current === 'local' && localPlayingRef.current) void audio.play().catch(() => undefined)

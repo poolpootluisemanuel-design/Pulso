@@ -25,7 +25,11 @@ interface PulsoAudioPlugin {
   startAudio(options: { title: string }): Promise<{ started: boolean }>
   stopAudio(): Promise<{ stopped: boolean }>
   updateMedia(options: { title: string; artist: string; playing: boolean }): Promise<void>
-  addListener(eventName: 'mediaControl', listenerFunc: (data: { action: string }) => void): Promise<PluginListenerHandle>
+  playUrl(options: { url: string; title: string; artist: string }): Promise<void>
+  pausePlayer(): Promise<void>
+  seekTo(options: { positionMs: number }): Promise<void>
+  getPosition(): Promise<{ positionMs: number; durationMs: number; playing: boolean }>
+  addListener(eventName: string, listenerFunc: (data: { action?: string; type?: string; message?: string }) => void): Promise<PluginListenerHandle>
 }
 
 const PulsoAudio = registerPlugin<PulsoAudioPlugin>('PulsoAudio')
@@ -73,5 +77,60 @@ export function addMediaControlListener(cb: (action: MediaControlAction) => void
   return PulsoAudio.addListener('mediaControl', (data) => {
     const a = (data as { action?: string }).action
     if (a === 'play' || a === 'pause' || a === 'next' || a === 'previous') cb(a)
+  }).catch(() => null)
+}
+
+// --- Reproductor NATIVO (ExoPlayer): el audio sale del WebView para
+// que no se corte al salir de la app ni al apagar la pantalla. En
+// web no existe: ahí sigue el <audio> de siempre. ---
+
+/** Reproduce una URL nativa (content:// local o stream https). */
+export async function playNativeUrl(url: string, title: string, artist: string): Promise<void> {
+  if (!audioServiceSupported()) return
+  try {
+    await PulsoAudio.playUrl({ url, title, artist })
+  } catch {
+    /* el elemento web sigue de respaldo en la app */
+  }
+}
+
+/** Pausa el reproductor nativo y para el servicio. */
+export async function pauseNative(): Promise<void> {
+  if (!audioServiceSupported()) return
+  try {
+    await PulsoAudio.pausePlayer()
+  } catch {
+    /* noop */
+  }
+}
+
+/** Adelantar / atrasar en el reproductor nativo (milisegundos). */
+export async function seekNative(positionMs: number): Promise<void> {
+  if (!audioServiceSupported()) return
+  try {
+    await PulsoAudio.seekTo({ positionMs })
+  } catch {
+    /* noop */
+  }
+}
+
+/** Posición y duración actuales del reproductor nativo. */
+export async function getNativePosition(): Promise<{ positionMs: number; durationMs: number; playing: boolean } | null> {
+  if (!audioServiceSupported()) return null
+  try {
+    return await PulsoAudio.getPosition()
+  } catch {
+    return null
+  }
+}
+
+export type PlayerEventType = 'ended' | 'error'
+
+/** El reproductor nativo avisa cuando termina la canción o falla. */
+export function addPlayerEventListener(cb: (ev: { type: PlayerEventType; message?: string }) => void): Promise<PluginListenerHandle | null> {
+  if (!audioServiceSupported()) return Promise.resolve(null)
+  return PulsoAudio.addListener('playerEvent', (data) => {
+    const t = (data as { type?: string }).type
+    if (t === 'ended' || t === 'error') cb({ type: t, message: (data as { message?: string }).message })
   }).catch(() => null)
 }
