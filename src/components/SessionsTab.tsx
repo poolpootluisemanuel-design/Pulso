@@ -32,7 +32,7 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0, guest = false, onNeedAccount }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void }) {
+export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0, guest = false, onNeedAccount, gpsActive = false, onMapImmersiveChange }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void; gpsActive?: boolean; onMapImmersiveChange?: (active: boolean) => void }) {
   const [showForm, setShowForm] = useState(false)
   // El botón flotante "+" (App.tsx) abre el formulario de crear: cada
   // toque suma 1 a createSignal y aquí se abre el formulario.
@@ -202,6 +202,28 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
   // Primera ruta que se muestra al abrir Rutas: la primera de su zona.
   const firstRouteForZone = routesSortedByZone(profile.zone)[0] || RECOMMENDED_ROUTES[0]
 
+  // Vista inmersiva del mapa (Fase 1): Sesiones → Mapa a pantalla
+  // completa cuando hay algo que mostrar en el mapa (sesiones con
+  // ubicación, o una ruta seleccionada). Sin sesiones con ubicación,
+  // la vista de mapa sigue siendo la de antes (mensaje vacío), sin
+  // overlay. La lista no cambia: solo cambia dónde se dibuja el mapa.
+  const showImmersiveMap = view === 'mapa' && (mapMode === 'rutas' ? selectedRoute !== null : withCoords.length > 0)
+  // Avisar a App (esconde el FAB "+" que el overlay taparía) y
+  // bloquear el scroll de la página detrás mientras el mapa inmersivo
+  // está abierto.
+  useEffect(() => {
+    onMapImmersiveChange?.(showImmersiveMap)
+    // Al desmontar (cambiar de pestaña con el mapa abierto), avisar
+    // que ya no está inmersivo para no dejar el FAB escondido.
+    return () => { onMapImmersiveChange?.(false) }
+  }, [showImmersiveMap, onMapImmersiveChange])
+  useEffect(() => {
+    if (!showImmersiveMap) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [showImmersiveMap])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -263,16 +285,16 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
 
       {/* Vista Lista / Mapa */}
       <div className="flex gap-2">
-        <button onClick={() => setView('lista')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
-        <button onClick={openMap} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
+        <button onClick={() => setView('lista')} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'lista' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📋 Lista</button>
+        <button onClick={openMap} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${view === 'mapa' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🗺️ Mapa ({withCoords.length})</button>
       </div>
 
-      {view === 'mapa' && (
+      {view === 'mapa' && !showImmersiveMap && (
         <div className="space-y-3">
           {/* Dentro del mapa: sesiones o rutas recomendadas para correr. */}
           <div className="flex gap-2">
-            <button onClick={() => setMapMode('sesiones')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'sesiones' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📍 Sesiones ({withCoords.length})</button>
-            <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(firstRouteForZone) }} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
+            <button onClick={() => setMapMode('sesiones')} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'sesiones' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📍 Sesiones ({withCoords.length})</button>
+            <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(firstRouteForZone) }} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
           </div>
 
           {mapMode === 'sesiones' && (withCoords.length === 0 ? (
@@ -334,6 +356,107 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
               />
             </>
           )}
+        </div>
+      )}
+
+      {/* Mapa inmersivo (Fase 1): contenedor fixed a pantalla completa.
+          El mapa llena el área sobre la navegación + el dock de música
+          (que quedan visibles y funcionales). La hoja es hija flex
+          (modo dock): el mapa ocupa lo que queda arriba y la
+          atribución de MapLibre queda visible justo encima de la hoja,
+          nunca tapada. En escritorio la hoja es panel lateral. Se sale
+          con ← Lista; + Crear sale del mapa y abre el formulario. */}
+      {showImmersiveMap && (
+        <div className={`pulso-map-immersive ${gpsActive ? 'pulso-map-immersive-gps' : ''}`}>
+          <div className="relative min-h-0 flex-1">
+            <Suspense fallback={<div className="flex h-full items-center justify-center bg-[#EFEAE2] text-sm font-bold text-night">🗺️ Cargando mapa…</div>}>
+              {mapMode === 'sesiones' ? (
+                <MapView
+                  center={mapCenter}
+                  markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]}
+                  defaultBasemap={defaultBasemap}
+                  offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles."
+                  immersive
+                />
+              ) : selectedRoute ? (
+                <MapView
+                  center={selectedRoute.points[0]}
+                  guidePoints={selectedRoute.points}
+                  defaultBasemap={defaultBasemap}
+                  markers={[
+                    { key: 'r-inicio', lat: selectedRoute.points[0].lat, lng: selectedRoute.points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
+                    { key: 'r-fin', lat: selectedRoute.points[selectedRoute.points.length - 1].lat, lng: selectedRoute.points[selectedRoute.points.length - 1].lng, emoji: '🏁', color: '#E63946', popupHtml: '<b>Fin</b>' },
+                    ...youMarker,
+                  ]}
+                  offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles."
+                  immersive
+                />
+              ) : null}
+            </Suspense>
+            {/* Pastilla flotante: salir a la lista + crear sesión. */}
+            <div className="absolute left-2 z-20 flex items-center gap-2" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+              <button type="button" onClick={() => setView('lista')} className="pulso-press rounded-full bg-white/95 px-3 py-2 text-sm font-black text-night shadow-lg">← Lista</button>
+              <span className="rounded-full bg-night/85 px-3 py-2 text-xs font-bold text-white shadow-lg">🗺️ Mapa · {profile.zone}</span>
+              {!guest && (
+                <button type="button" onClick={() => { setView('lista'); setShowForm(true) }} className="pulso-press rounded-full bg-pulso px-3 py-2 text-sm font-black text-night shadow-lg">+ Crear</button>
+              )}
+            </div>
+          </div>
+          <MapBottomSheet
+            dock
+            title="Sesiones en el mapa"
+            count={withCoords.length}
+            header={(
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <button onClick={() => setMapMode('sesiones')} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'sesiones' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📍 Sesiones ({withCoords.length})</button>
+                  <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(firstRouteForZone) }} className={`pulso-press flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
+                </div>
+                {mapMode === 'sesiones' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowLive(!showLive)}
+                      aria-pressed={showLive}
+                      className={`pulso-press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${showLive ? 'bg-pulso text-night' : 'bg-white text-slate-600'}`}
+                    >
+                      {showLive ? '🔴' : '⚪'} Entrenando ahora{liveTrainers.length > 0 ? ` (${liveTrainers.length})` : ''}
+                    </button>
+                    {showLive && liveTrainers.length === 0 && (
+                      <span className="text-xs text-slate-500">Nadie entrena ahora mismo.</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          >
+            {mapMode === 'sesiones' ? (
+              <div className="space-y-2">
+                {withCoords.map((s) => {
+                  const list = rsvps[s.id]
+                  const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
+                  return (
+                    <div key={s.id} className="rounded-xl bg-white p-2 shadow-sm">
+                      <p className="text-sm font-bold text-night">{sportEmoji(s.sport)} {s.title}</p>
+                      <p className="text-xs text-slate-500">{weekdayName(s.date)} {formatDate(s.date)} · {s.time} · {s.place}</p>
+                      <p className="text-xs font-semibold text-teal-dark">Cupo {confirmed}/{s.capacity} · {s.host_name}</p>
+                    </div>
+                  )
+                })}
+                <p className="pt-1 text-center text-[11px] text-slate-500">Toca un marcador en el mapa para ver deporte, fecha, hora, lugar y cupos.</p>
+              </div>
+            ) : (
+              <RecommendedRoutes
+                selectedId={selectedRoute?.id || null}
+                onSelect={setSelectedRoute}
+                onRun={(r) => onRunRoute?.(r)}
+                userZone={profile.zone}
+                userPosition={gpsCenter}
+                onRequestLocation={requestUserPosition}
+                locState={locState}
+              />
+            )}
+          </MapBottomSheet>
         </div>
       )}
 

@@ -135,6 +135,13 @@ export default function MapView({
   // resolveInitialBasemap: la preferencia guardada manda y los
   // usuarios nuevos ven el mapa deportivo ('sport').
   defaultBasemap = 'sport',
+  // Modo inmersivo (Sesiones → Mapa, Fase 1): el mapa deja de ser una
+  // tarjeta de altura fija y llena el contenedor que le da quien lo
+  // monta (100% de alto, sin rounded/border/shadow). Los controles
+  // flotantes bajan con .pulso-map-controls-top para no quedar debajo
+  // de la barra de estado ni de la pastilla flotante. Sin immersive,
+  // todo queda como antes (tarjeta con altura en px).
+  immersive = false,
 }: {
   center?: MapPoint
   zoom?: number
@@ -150,6 +157,8 @@ export default function MapView({
   /** Punto al que centrar el mapa cuando focusKey cambia. */
   focus?: MapPoint | null
   focusKey?: number
+  /** Modo inmersivo: altura 100% del contenedor, sin estilo de tarjeta. */
+  immersive?: boolean
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -551,18 +560,18 @@ export default function MapView({
 
   if (webglFailed) {
     return (
-      <div className="rounded-2xl bg-night p-4 text-center text-sm text-white/80" style={{ height }}>
+      <div className={`bg-night p-4 text-center text-sm text-white/80 ${immersive ? 'h-full' : 'rounded-2xl'}`} style={immersive ? undefined : { height }}>
         Tu navegador no soporta el mapa 3D, pero tu ruta se sigue grabando con GPS igual.
       </div>
     )
   }
 
   return (
-    <div>
+    <div className={immersive ? 'flex h-full flex-col' : undefined}>
       {!online && offlineNote && (
         <p className="mb-2 rounded-xl bg-amber-50 p-2 text-center text-xs font-semibold text-amber-800">{offlineNote}</p>
       )}
-      <div className="pulso-map relative w-full overflow-hidden rounded-2xl border border-night/20 shadow-md shadow-night/20" style={{ height }}>
+      <div className={`pulso-map relative w-full overflow-hidden ${immersive ? 'min-h-0 flex-1' : 'rounded-2xl border border-night/20 shadow-md shadow-night/20'}`} style={immersive ? undefined : { height }}>
         <div ref={containerRef} className="h-full w-full" style={{ background: basemap === 'dark' ? '#0A1B2E' : '#EFEAE2' }} />
         {contextLost && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-night/80 p-4 text-center text-sm font-semibold text-white">
@@ -583,7 +592,7 @@ export default function MapView({
           </button>
         )}
         {/* Fondo del mapa: Deportivo (principal), Oscuro o Satélite. */}
-        <div className="absolute left-2 top-2 z-10 flex gap-1.5">
+        <div className="pulso-map-controls-top absolute left-2 top-2 z-10 flex gap-1.5">
           <button type="button" onClick={() => switchBasemap('sport')} aria-label="Mapa deportivo"
             className={`rounded-full px-2.5 py-1.5 text-xs font-black shadow-lg ${basemap === 'sport' ? 'bg-pulso text-night' : 'bg-white/95 text-night'}`}>
             🏃 Deportivo
@@ -598,7 +607,7 @@ export default function MapView({
           </button>
         </div>
         {/* Controles flotantes: zoom, ubicación, 2D/3D y girar. */}
-        <div className="absolute right-2 top-2 z-10 flex flex-col gap-1.5">
+        <div className="pulso-map-controls-top absolute right-2 top-2 z-10 flex flex-col gap-1.5">
           <button type="button" onClick={() => zoomBy(1)} aria-label="Acercar el mapa"
             className="rounded-full bg-white/95 px-3 py-1.5 text-base font-black text-night shadow-lg">+</button>
           <button type="button" onClick={() => zoomBy(-1)} aria-label="Alejar el mapa"

@@ -63,7 +63,7 @@ export default function Auth({ onDone, onGuest, initialView }: { onDone: () => v
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-night-50 pb-8">
+    <div className="mx-auto min-h-dvh max-w-md bg-night-50 pb-8">
       {/* Hero visual: foto + degradado marrón cálido → rosa.
           Sin internet la foto no carga y queda el degradado (nunca en blanco). */}
       <div className="relative overflow-hidden bg-gradient-to-b from-night via-night to-pulso-dark">

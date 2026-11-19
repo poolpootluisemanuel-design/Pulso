@@ -68,3 +68,53 @@ input, select, textarea { font-size: 16px; }
 .pulse-line { animation: pulso-line 2.4s linear infinite; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* Fase 0 (evolución móvil 2026-11-19): que el toque se sienta de app,
+   no de página web. Estado de presión discreto en los controles
+   principales (botones Btn, FAB, navegación, cambios de vista): se
+   encoge un poco al tocar y vuelve al soltar. Solo transform: no
+   mueve el layout ni desmonta nada. */
+.pulso-press { transition: transform .15s ease, filter .15s ease; }
+.pulso-press:active { transform: scale(.96); }
+/* Los botones del mapa (zoom, fondo, 2D/3D, girar, Seguirme) también
+   responden al toque, sin tocar su JSX. */
+.pulso-map button { transition: transform .15s ease; }
+.pulso-map button:active { transform: scale(.96); }
+/* Transición de cambio de pestaña (fade + deslizamiento corto). Se
+   aplica a un envoltorio por pestaña en App.tsx: cada panel se monta
+   al entrar a su pestaña, así la animación corre sola al montar. NO
+   se pone key={tab} sobre el contenedor de Train/MusicPlayer: esos
+   dos quedan siempre montados y la animación no los toca (Train se
+   oculta con CSS, su envoltorio anima solo al primer montaje). */
+@keyframes pulso-tab-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.pulso-tab-in { animation: pulso-tab-in .15s ease-out; }
+
+/* Fase 1 (mapa inmersivo): contenedor a pantalla completa de
+   Sesiones → Mapa. Es fixed y cubre de borde a borde, desde arriba
+   del todo hasta encima de la navegación + el dock de música (que
+   quedan visibles y funcionales por encima del mapa). El encabezado
+   global queda tapado por este contenedor: dentro va una pastilla
+   flotante propia (← Lista · título · + Crear). La hoja inferior es
+   hija flex de este contenedor (modo dock de MapBottomSheet): el mapa
+   ocupa lo que queda arriba y la atribución de MapLibre queda visible
+   justo encima de la hoja, nunca tapada. Con GPS grabando, la barrita
+   de GPS se apila encima de la música y el mapa reserva también esos
+   52 px (variante .pulso-map-immersive-gps). En escritorio (≥768 px)
+   el contenedor pasa a fila: mapa a la izquierda y la hoja como panel
+   lateral derecho de ~380 px. */
+.pulso-map-immersive {
+  position: fixed; left: 0; right: 0; top: 0; z-index: 30;
+  display: flex; flex-direction: column;
+  bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px));
+  background: #EFEAE2;
+}
+.pulso-map-immersive-gps {
+  bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .pulso-map-immersive { flex-direction: row; }
+}
+/* En modo inmersivo el mapa llega hasta arriba (debajo de la barra de
+   estado): los controles flotantes de MapView bajan por debajo de la
+   pastilla flotante de Sesiones, con el área segura del teléfono. */
+.pulso-map-immersive .pulso-map-controls-top { top: calc(env(safe-area-inset-top, 0px) + 58px); }
