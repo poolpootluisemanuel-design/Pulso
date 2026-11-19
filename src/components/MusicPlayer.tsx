@@ -425,13 +425,22 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     }
   }, [playing, playingTitle, source])
 
-  // Media Session (local).
+  // Media Session (local): controles de la pantalla de bloqueo /
+  // notificación (play, pausa, anterior, siguiente).
+  // ANTES, al pausar se borraba el metadata (ms.metadata = null) y
+  // el efecto salía sin registrar los handlers: la notificación de
+  // la pantalla de bloqueo perdía la canción y los botones, y ya no
+  // se podía reanudar ni cambiar de canción desde ahí (había que
+  // volver a abrir la app). Ahora el metadata y los 4 handlers
+  // quedan registrados mientras haya una canción cargada (suene o
+  // no), así la pantalla de bloqueo siempre responde. Solo se
+  // limpian cuando no hay canción o se cambia a YouTube.
   useEffect(() => {
     if (source !== 'local') return
     const ms = navigator.mediaSession
     if (!ms) return
-    if (!localPlaying || !currentLocal) {
-      if (!localPlaying) ms.metadata = null
+    if (!currentLocal) {
+      try { ms.metadata = null } catch { /* noop */ }
       return
     }
     try {
@@ -453,7 +462,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       } catch { /* noop */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localPlaying, localIndex, source])
+  }, [localPlaying, localIndex, source, currentLocal])
 
   // Liberar las URLs locales al desmontar (son solo de esta sesión).
   useEffect(() => () => {
@@ -606,12 +615,22 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             <p className="truncate text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}</p>
           </div>
           {source === 'local' && localTracks.length > 1 && (
-            <button
-              onClick={() => playLocal((localIndex + 1) % localTracks.length)}
-              className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
-            >
-              ⏭
-            </button>
+            <>
+              <button
+                onClick={() => playLocal((localIndex - 1 + localTracks.length) % localTracks.length)}
+                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                aria-label="Canción anterior"
+              >
+                ⏮
+              </button>
+              <button
+                onClick={() => playLocal((localIndex + 1) % localTracks.length)}
+                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                aria-label="Siguiente canción"
+              >
+                ⏭
+              </button>
+            </>
           )}
           <button
             onClick={() => { if (!compact) onExpandedChange?.(true); else onGoTrain?.() }}
