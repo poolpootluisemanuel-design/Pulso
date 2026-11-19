@@ -12,6 +12,7 @@ import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
 const MapView = lazy(() => import('./MapView'))
 import type { MapMarker } from './MapView'
 import RecommendedRoutes from './RecommendedRoutes'
+import MapBottomSheet from './MapBottomSheet'
 import { RECOMMENDED_ROUTES, routesSortedByZone, zoneCenter } from '../lib/routes'
 import type { RecommendedRoute } from '../lib/routes'
 import { isNative } from '../lib/native'
@@ -280,7 +281,25 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
             <>
               <LiveTrainingLayer trainers={liveTrainers} visible={showLive} onToggle={setShowLive} selfProfileId={profile.id} />
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                <div className="relative" style={{ height: 320 }}>
+                  <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
+                  <MapBottomSheet title="Sesiones en el mapa" count={withCoords.length}>
+                    <div className="space-y-2">
+                      {withCoords.map((s) => {
+                        const list = rsvps[s.id]
+                        const confirmed = list?.filter((r) => r.status === 'confirmed').length ?? 0
+                        return (
+                          <div key={s.id} className="rounded-xl bg-white p-2 shadow-sm">
+                            <p className="text-sm font-bold text-night">{sportEmoji(s.sport)} {s.title}</p>
+                            <p className="text-xs text-slate-500">{weekdayName(s.date)} {formatDate(s.date)} · {s.time} · {s.place}</p>
+                            <p className="text-xs font-semibold text-teal-dark">Cupo {confirmed}/{s.capacity} · {s.host_name}</p>
+                          </div>
+                        )
+                      })}
+                      <p className="pt-1 text-center text-[11px] text-slate-500">Toca un marcador en el mapa para ver deporte, fecha, hora, lugar y cupos.</p>
+                    </div>
+                  </MapBottomSheet>
+                </div>
               </Suspense>
               <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
             </>
