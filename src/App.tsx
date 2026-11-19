@@ -7,6 +7,7 @@ import Home from './components/Home'
 import ProfileTab from './components/ProfileTab'
 import Search from './components/Search'
 import SessionsTab from './components/SessionsTab'
+import RoutesTab from './components/RoutesTab'
 import Train from './components/Train'
 import MusicPlayer from './components/MusicPlayer'
 import Tutorial, { hasSeenTutorial, markTutorialSeen } from './components/Tutorial'
@@ -28,11 +29,12 @@ import type { AuthUser, Business, Challenge, Post, Profile, SessionItem, Workout
 import type { RecommendedRoute } from './lib/routes'
 import { detectZone } from './lib/utils'
 
-type Tab = 'inicio' | 'sesiones' | 'entrenar' | 'retos' | 'mas'
+type Tab = 'inicio' | 'sesiones' | 'rutas' | 'entrenar' | 'retos' | 'mas'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'inicio', label: 'Inicio', icon: '🏠' },
   { id: 'sesiones', label: 'Sesiones', icon: '📅' },
+  { id: 'rutas', label: 'Rutas', icon: '🗺️' },
   { id: 'entrenar', label: 'Entrenar', icon: '🏃' },
   { id: 'retos', label: 'Retos', icon: '🏅' },
   { id: 'mas', label: 'Más', icon: '⋯' },
@@ -83,8 +85,8 @@ export default function App() {
   // y que Luis toque Actualizar (skipWaiting + recarga) en vez de
   // tener que borrar el caché para ver cada ajuste.
   const [updateAvailable, setUpdateAvailable] = useState(false)
-  // Ruta recomendada elegida en Sesiones → Mapa → "Recorrer esta
-  // ruta": Entrenar abre el GPS con esa ruta como guía teal.
+  // Ruta recomendada elegida en Rutas → "Recorrer esta ruta":
+  // Entrenar abre el GPS con esa ruta como guía teal.
   const [guideRoute, setGuideRoute] = useState<RecommendedRoute | null>(null)
   // Botón flotante "+ Crear" de Sesiones: cada toque suma 1 y
   // SessionsTab abre el formulario.
@@ -405,7 +407,8 @@ export default function App() {
 
       <main className={`mx-auto max-w-2xl px-4 pt-4 ${activity.gps?.active ? 'pulso-main-gps' : 'pulso-main'}`}>
         {tab === 'inicio' && <Home profile={profile} sessions={sessions} workouts={workouts} onGoSessions={() => goTab('sesiones')} />}
-        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
+        {tab === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
+        {tab === 'rutas' && <RoutesTab profile={profile} onRunRoute={(r) => { setGuideRoute(r); goTab('entrenar') }} />}
         {/* Entrenar se mantiene montado SIEMPRE y solo se oculta con CSS:
             antes se desmontaba al cambiar de pestaña y se perdía el GPS
             que se estaba grabando y la música. Así el cronómetro, la ruta
@@ -528,7 +531,7 @@ export default function App() {
         <div className="mx-auto flex h-full max-w-2xl">
           {TABS.map((t) => (
             <button key={t.id} onClick={() => goTab(t.id)} className={`flex h-full flex-1 flex-col items-center justify-center text-[11px] font-bold ${tab === t.id ? 'text-pulso-dark' : 'text-slate-400'}`}>
-              {/* Entrenar es la pestaña central: círculo rosa para que
+              {/* Entrenar es la acción principal: círculo rosa para que
                   se vea como el botón principal de la app. */}
               <span className={`flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none ${t.id === 'entrenar' ? 'bg-pulso text-night shadow-md shadow-pulso/40' : ''}`}>{t.icon}</span>
               {t.label}

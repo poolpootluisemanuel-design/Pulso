@@ -11,11 +11,7 @@ import { Btn, Card, Empty, Field, inputCls, selectCls, Tag } from './ui'
 // de mapa, no en la primera carga de la app.
 const MapView = lazy(() => import('./MapView'))
 import type { MapMarker } from './MapView'
-import RecommendedRoutes from './RecommendedRoutes'
-import { RECOMMENDED_ROUTES, routesSortedByZone, zoneCenter } from '../lib/routes'
-import type { RecommendedRoute } from '../lib/routes'
-import { isNative } from '../lib/native'
-import { getNativeCurrentPosition } from '../lib/nativeGps'
+import { zoneCenter } from '../lib/routes'
 
 const SPORT_EMOJI: Record<string, string> = {
   running: '🏃', caminata: '🚶', pádel: '🎾', padel: '🎾', crossfit: '💪',
@@ -31,7 +27,7 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, createSignal = 0, guest = false, onNeedAccount }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; onRunRoute?: (route: RecommendedRoute) => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void }) {
+export default function SessionsTab({ profile, sessions, onRefresh, createSignal = 0, guest = false, onNeedAccount }: { profile: Profile; sessions: SessionItem[]; onRefresh: () => void; createSignal?: number; guest?: boolean; onNeedAccount?: () => void }) {
   const [showForm, setShowForm] = useState(false)
   // El botón flotante "+" (App.tsx) abre el formulario de crear: cada
   // toque suma 1 a createSignal y aquí se abre el formulario.
@@ -62,44 +58,14 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
   const [showLive, setShowLive] = useState(true)
   // Vista Lista / Mapa y ubicación del lugar al crear la sesión.
   const [view, setView] = useState<'lista' | 'mapa'>('lista')
-  // Dentro del mapa: sesiones con ubicación o rutas recomendadas.
-  const [mapMode, setMapMode] = useState<'sesiones' | 'rutas'>('sesiones')
-  // Suscripción al mapa en vivo: solo en vista mapa + modo sesiones.
+  // Suscripción al mapa en vivo: solo en vista mapa.
   useEffect(() => {
-    if (view !== 'mapa' || mapMode !== 'sesiones') return
+    if (view !== 'mapa') return
     return subscribeLiveTrainers(setLiveTrainers)
-  }, [view, mapMode])
-  const [selectedRoute, setSelectedRoute] = useState<RecommendedRoute | null>(null)
+  }, [view])
   // Centro del mapa: GPS del usuario si ya dio permiso, si no su zona
   // (Isla Mujeres si es su zona), nunca siempre Cancún centro.
   const [gpsCenter, setGpsCenter] = useState<{ lat: number; lng: number } | null>(null)
-  // Estado de la ubicación pedida a mano (botón de rutas cercanas).
-  const [locState, setLocState] = useState<'idle' | 'loading' | 'denied' | 'unavailable'>('idle')
-
-  // Pide la ubicación actual una sola vez (botón "Mostrar las más
-  // cercanas a mí" en Rutas): en nativo con Capacitor, en web con el
-  // navegador. Sirve para ordenar las rutas por cercanía y para el
-  // marcador "Estás aquí" en el mapa.
-  function requestUserPosition() {
-    setLocState('loading')
-    if (isNative()) {
-      void getNativeCurrentPosition().then((p) => {
-        if (!p) { setLocState('denied'); return }
-        setGpsCenter({ lat: p.lat, lng: p.lng })
-        setLocState('idle')
-      })
-      return
-    }
-    if (!('geolocation' in navigator)) { setLocState('unavailable'); return }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGpsCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        setLocState('idle')
-      },
-      () => setLocState('denied'),
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
-  }
 
   // Al abrir el mapa, intenta centrar en el GPS si el permiso ya está
   // concedido (sin preguntar de nuevo); si no, centra en su zona.
@@ -198,8 +164,6 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
   // mapa arranca en satélite (se ve la isla real). El usuario puede
   // cambiarlo con el selector y su elección se guarda.
   const defaultBasemap = profile.zone === 'Isla Mujeres' ? 'satellite' as const : 'dark' as const
-  // Primera ruta que se muestra al abrir Rutas: la primera de su zona.
-  const firstRouteForZone = routesSortedByZone(profile.zone)[0] || RECOMMENDED_ROUTES[0]
 
   return (
     <div className="space-y-4">
@@ -268,13 +232,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
 
       {view === 'mapa' && (
         <div className="space-y-3">
-          {/* Dentro del mapa: sesiones o rutas recomendadas para correr. */}
-          <div className="flex gap-2">
-            <button onClick={() => setMapMode('sesiones')} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'sesiones' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>📍 Sesiones ({withCoords.length})</button>
-            <button onClick={() => { setMapMode('rutas'); if (!selectedRoute) setSelectedRoute(firstRouteForZone) }} className={`flex-1 rounded-full px-3 py-2 text-sm font-bold ${mapMode === 'rutas' ? 'bg-night text-white' : 'bg-white text-slate-600 shadow-sm'}`}>🏃 Rutas ({RECOMMENDED_ROUTES.length})</button>
-          </div>
-
-          {mapMode === 'sesiones' && (withCoords.length === 0 ? (
+          {withCoords.length === 0 ? (
             <Empty text="Ninguna sesión tiene ubicación en el mapa todavía. Al crear una, toca «Usar mi ubicación» estando en el lugar." />
           ) : (
             <>
@@ -282,37 +240,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, onRunRoute, 
               <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
                 <MapView center={mapCenter} markers={[...markers, ...youMarker, ...(showLive ? liveTrainersToMarkers(liveTrainers, profile.id) : [])]} height={320} defaultBasemap={defaultBasemap} offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles." />
               </Suspense>
-              <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista.</p>
-            </>
-          ))}
-
-          {mapMode === 'rutas' && (
-            <>
-              {selectedRoute && (
-                <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
-                  <MapView
-                    center={selectedRoute.points[0]}
-                    guidePoints={selectedRoute.points}
-                    defaultBasemap={defaultBasemap}
-                    markers={[
-                      { key: 'r-inicio', lat: selectedRoute.points[0].lat, lng: selectedRoute.points[0].lng, emoji: '🟢', color: '#14B8A6', popupHtml: '<b>Inicio</b>' },
-                      { key: 'r-fin', lat: selectedRoute.points[selectedRoute.points.length - 1].lat, lng: selectedRoute.points[selectedRoute.points.length - 1].lng, emoji: '🏁', color: '#E63946', popupHtml: '<b>Fin</b>' },
-                      ...youMarker,
-                    ]}
-                    height={320}
-                    offlineNote="📶 Sin internet: el mapa necesita internet para cargar las calles."
-                  />
-                </Suspense>
-              )}
-              <RecommendedRoutes
-                selectedId={selectedRoute?.id || null}
-                onSelect={setSelectedRoute}
-                onRun={(r) => onRunRoute?.(r)}
-                userZone={profile.zone}
-                userPosition={gpsCenter}
-                onRequestLocation={requestUserPosition}
-                locState={locState}
-              />
+              <p className="text-center text-xs text-slate-500">Toca un marcador para ver deporte, fecha, hora, lugar y cupos. Las sesiones sin ubicación solo salen en la lista. Las rutas para entrenar están en la pestaña Rutas.</p>
             </>
           )}
         </div>

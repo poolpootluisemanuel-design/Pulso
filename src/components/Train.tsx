@@ -38,8 +38,8 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
   const [showGps, setShowGps] = useState(() => {
     try { return localStorage.getItem(GPS_SAVED_KEY) !== null } catch { return false }
   })
-  // "Recorrer esta ruta": al elegir una ruta recomendada en Sesiones →
-  // Mapa, Entrenar abre el GPS solo, con la ruta como guía teal.
+  // "Recorrer esta ruta": al elegir una ruta recomendada en Rutas,
+  // Entrenar abre el GPS solo, con la ruta como guía teal.
   useEffect(() => {
     if (guideRoute) setShowGps(true)
   }, [guideRoute])

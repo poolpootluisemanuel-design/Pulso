@@ -53,7 +53,7 @@ export { GPS_SAVED_KEY }
  *  La grabación en curso se guarda en localStorage mientras graba, así
  *  sobrevive al cambiar de pestaña (Train ya no se desmonta) y a recargar:
  *  al volver queda en pausa, lista para reanudar donde iba.
- *  Con `guide` (ruta recomendada elegida en Sesiones → Mapa), la ruta
+ *  Con `guide` (ruta recomendada elegida en Rutas), la ruta
  *  se dibuja como línea teal punteada de referencia mientras grabas. */
 export default function GpsTracker({ profile, onSave, onCancel, onProgress, guide, onClearGuide }: { profile?: Profile; onSave: (r: GpsResult) => void; onCancel: () => void; onProgress?: (p: GpsProgress) => void; guide?: RecommendedRoute | null; onClearGuide?: () => void }) {
   const savedRef = useRef<SavedGps | null>(null)
