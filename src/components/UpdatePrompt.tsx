@@ -1,9 +1,13 @@
 // Modal "Hay una actualización": sale al abrir la app cuando
 // version.json remoto trae un versionCode mayor que el instalado.
-// "Actualizar ahora" abre el enlace directo del APK nuevo (se
-// instala encima, sin perder cuenta ni datos). "Después" lo cierra
+// "Actualizar ahora" abre el enlace directo del APK nuevo con
+// openExternalUrl (en la app nativa window.open se ignora en
+// silencio). OJO: cada build lleva una llave debug nueva, así que
+// el APK NO se instala encima: hay que desinstalar la versión
+// anterior primero y luego instalar esta. "Después" lo cierra
 // y vuelve a salir la próxima vez que se abra la app.
 import type { RemoteVersion } from '../lib/appUpdate'
+import { openExternalUrl } from '../lib/openExternal'
 import { Btn, Card } from './ui'
 
 export default function UpdatePrompt({ version, onLater }: { version: RemoteVersion; onLater: () => void }) {
@@ -14,7 +18,7 @@ export default function UpdatePrompt({ version, onLater }: { version: RemoteVers
           <p className="text-4xl">⬆️</p>
           <h3 className="mt-2 text-xl font-black text-night">Hay una actualización</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Versión nueva {version.versionName}. Se instala encima, no pierdes tu cuenta ni tus datos.
+            Versión nueva {version.versionName}. Si ya tienes PULSO, desinstala la versión anterior primero y luego instala esta.
           </p>
           {version.notes.length > 0 && (
             <ul className="mx-auto mt-3 max-w-sm space-y-1 text-left text-sm text-slate-700">
@@ -27,7 +31,7 @@ export default function UpdatePrompt({ version, onLater }: { version: RemoteVers
             <Btn
               variant="coral"
               className="w-full"
-              onClick={() => window.open(version.apkUrl, '_blank')}
+              onClick={() => void openExternalUrl(version.apkUrl)}
             >
               Actualizar ahora
             </Btn>

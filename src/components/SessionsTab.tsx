@@ -194,10 +194,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-black text-teal-dark">Sesiones y eventos</h2>
-        {/* Solo un botón para crear: con cuenta es el flotante "+"
-            (App.tsx); en modo invitado el flotante no existe, así que
-            aquí queda el botón que abre la puerta a crear cuenta. */}
-        {guest && <Btn variant="coral" onClick={() => onNeedAccount?.()}>+ Crear</Btn>}
+        <Btn variant="coral" onClick={() => { if (guest) { onNeedAccount?.(); return } setShowForm(!showForm) }}>+ Crear</Btn>
       </div>
 
       {msg && <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">{msg}</p>}
@@ -391,7 +388,7 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
                       setErr('')
                       try {
                         const st = await joinSession(s, profile.id)
-                        setMsg(st === 'confirmed' ? '¡Confirmado! Te esperamos.' : 'Cupo lleno, quedaste en lista de espera. Te avisamos si se libera un lugar.')
+                        setMsg(st === 'confirmed' ? '¡Confirmado! Te esperamos.' : 'Cupo lleno, quedaste en lista de espera. Revisa la app: si se libera un lugar, aparecerás como confirmado.')
                         await loadRsvps(s.id)
                       } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No te pudiste apuntar.') }
                     }}>Me apunto</Btn>

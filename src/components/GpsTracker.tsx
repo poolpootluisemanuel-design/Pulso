@@ -155,6 +155,11 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   // desde el ancla sigue rechazándose (10 m/s). Por eso el ancla solo
   // se mueve al aceptar un fix, nunca al descartarlo.
   const anchorAtRef = useRef<number>(0)
+  // Contador de descartes seguidos por el filtro de 200 m (Fase 3,
+  // B1): tras un hueco real de señal, el ancla queda lejos y TODOS
+  // los puntos se descartan para siempre. Con este contador se
+  // re-ancla solo tras un hueco real (ver handleFix).
+  const jumpDiscardsRef = useRef<number>(0)
   // Ventana de 30 s para detectar parado: distancia real aceptada en ella.
   const stillWindowStart = useRef<number>(0)
   const stillWindowDistKm = useRef<number>(0)
@@ -373,12 +378,39 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   function handleFix(next: Point, accuracy: number) {
     const now = Date.now()
     const prev = lastPoint.current
-    if (!prev) { lastPoint.current = next; anchorAtRef.current = now; return }
+    if (!prev) { lastPoint.current = next; anchorAtRef.current = now; jumpDiscardsRef.current = 0; return }
     const d = haversineKm(prev, next)
     // Tiempo desde que se fijó el ANCLA (último punto aceptado), no
     // desde la última lectura: ver el comentario de anchorAtRef.
     const dtSec = Math.max(0.5, (now - anchorAtRef.current) / 1000)
-    if (d > 0.2) return // salto mayor a 200 m: error del GPS, se ignora
+    if (d > 0.2) {
+      // Salto mayor a 200 m: error del GPS, se ignora... SALVO hueco
+      // real de señal (Fase 3, B1). Sin esto, tras perder la señal
+      // con desplazamiento, el ancla queda lejos y TODOS los puntos
+      // se descartan para siempre (la grabación se congela; solo
+      // Pausar/Reanudar manual la recuperaba). Re-anclar SOLO si
+      // se cumplen TODAS: pasaron ≥60 s desde el último punto
+      // aceptado y es el 2.º o 3.er descarte seguido con buena
+      // precisión. La distancia del hueco NO se suma (se
+      // inventaría); la ruta dibuja un tramo recto honesto hasta
+      // la posición actual y el tiempo/distancia acumulados se
+      // conservan.
+      jumpDiscardsRef.current += 1
+      const gapSec = (now - anchorAtRef.current) / 1000
+      const n = jumpDiscardsRef.current
+      if (gapSec >= 60 && (n === 2 || n === 3) && accuracy <= 25) {
+        lastPoint.current = next
+        anchorAtRef.current = now
+        stillWindowStart.current = now
+        stillWindowDistKm.current = 0
+        setAutoPausedBoth(false)
+        jumpDiscardsRef.current = 0
+        setCurrentPos(next)
+        setPoints((pts) => [...pts, next])
+        setError('Se recuperó la señal: la grabación sigue desde tu posición actual; el tramo sin señal no se contó.')
+      }
+      return
+    }
     // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
     // caminando. La deriva salta así; el movimiento real no.
     const speedMs = (d * 1000) / dtSec
@@ -412,8 +444,10 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     }
     // El ancla se mueve SOLO al aceptar el punto: aquí también se
     // actualiza el tiempo del ancla (la velocidad se mide desde aquí).
+    // Un punto aceptado corta la racha de descartes por salto (B1).
     lastPoint.current = next
     anchorAtRef.current = now
+    jumpDiscardsRef.current = 0
     stillWindowDistKm.current += d
     setCurrentPos(next)
     setDistanceKm((km) => km + d)
@@ -423,6 +457,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   function startWatch(from: Point) {
     lastPoint.current = from
     anchorAtRef.current = Date.now()
+    jumpDiscardsRef.current = 0
     stillWindowStart.current = Date.now()
     stillWindowDistKm.current = 0
     setAutoPausedBoth(false)

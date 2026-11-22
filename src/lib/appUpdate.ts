@@ -4,8 +4,10 @@
 // se compara su versionCode con APP_BUILD, el número de build de
 // ESTA app. Si el remoto es mayor, App muestra el modal "Hay una
 // actualización" con las novedades y el botón "Actualizar ahora"
-// (abre el enlace directo del APK nuevo, que se instala encima
-// porque todos llevan la misma llave fija).
+// (abre el enlace directo del APK nuevo con openExternalUrl.
+// OJO: cada build lleva una llave debug nueva, así que el APK NO se
+// instala encima: hay que desinstalar la versión anterior primero
+// y luego instalar esta).
 //
 // Proceso de cada release (¡no olvidar!):
 // 1) Subir APP_BUILD aquí y versionCode en public/version.json al
