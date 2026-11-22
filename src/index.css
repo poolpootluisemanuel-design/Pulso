@@ -31,6 +31,13 @@ input, select, textarea { font-size: 16px; }
 .pulso-main-gps { padding-bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + var(--pulso-gps-h) + env(safe-area-inset-bottom, 0px) + 24px); }
 /* Muelle de música: siempre encima de la navegación, nunca sobre ella. */
 .pulso-music-dock { bottom: calc(var(--pulso-nav-h) + env(safe-area-inset-bottom, 0px)); }
+/* Hoja del reproductor: su altura se mide contra el borde inferior
+   DEL DOCK (nav 64 px + safe-area), no contra el viewport. Antes
+   era h-[92dvh] y el tope quedaba fuera de la pantalla: con 3
+   botones y sin GPS se cortaban ~41 px (tirador y encabezado no se
+   veían, portada cortada). Con esta altura el tope queda a 8dvh del
+   borde superior del viewport, sin cortar nada. */
+.pulso-player-sheet { height: calc(92dvh - var(--pulso-nav-h) - env(safe-area-inset-bottom, 0px)); }
 /* Botón flotante +: encima de nav + música (+ GPS si graba, que ahora
    se apila encima de la música en vez de reemplazarla). */
 .pulso-fab { bottom: calc(var(--pulso-nav-h) + var(--pulso-music-h) + env(safe-area-inset-bottom, 0px) + 16px); }

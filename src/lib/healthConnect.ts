@@ -45,7 +45,10 @@ export async function requestStepsAccess(): Promise<boolean> {
   }
 }
 
-/** Pasos de hoy (de 00:00 hasta ahora), sumados con queryAggregated. */
+/** Pasos de hoy (de 00:00 hasta ahora), sumados con queryAggregated.
+ *  Devuelve null cuando no hay datos (sin muestras, sin permiso o
+ *  error): un 0 en ese caso sería engañoso — la tarjeta y GpsTracker
+ *  ya tratan null como «sin datos» y caen a otro camino. */
 export async function getTodaySteps(): Promise<number | null> {
   try {
     const start = new Date()
@@ -58,7 +61,7 @@ export async function getTodaySteps(): Promise<number | null> {
       aggregation: 'sum',
     })
     const v = samples[0]?.value
-    return typeof v === 'number' ? Math.round(v) : 0
+    return typeof v === 'number' ? Math.round(v) : null
   } catch {
     return null
   }

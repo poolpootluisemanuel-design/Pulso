@@ -527,14 +527,18 @@ export default function App() {
           <audio> local se paraba: la música se cortaba al cambiar de
           pestaña. Ahora la barrita de GPS se APILA ENCIMA de la
           mini-barra (el contenido reserva el espacio de las dos con
-          .pulso-main-gps) y la música sigue sonando. En Entrenar la
+          .pulso-main-gps) y la música sigue sonando. Con la hoja del
+          reproductor expandida la barrita se esconde (si no, empujaba
+          la hoja 52 px más arriba y se cortaba el tirador): el estado
+          de grabación sigue visible en Entrenar y la barrita vuelve
+          al recoger la hoja. En Entrenar la
           música sigue abajo como siempre, porque el GPS ya se ve en
           pantalla. Con el mapa inmersivo abierto el dock sube a z-40
           (el mapa es z-30): la mini-barra queda donde siempre (debajo
           del borde inferior del mapa) y la hoja expandida pinta por
           encima del mapa; MusicPlayer nunca se desmonta. */}
       <div id="pulso-music" className={`pulso-music-dock fixed left-0 right-0 ${mapImmersive ? 'z-40' : 'z-20'} mx-auto max-w-2xl px-3`}>
-        {tab !== 'entrenar' && activity.gps?.active && (
+        {tab !== 'entrenar' && activity.gps?.active && !musicExpanded && (
           <button
             onClick={() => goTab('entrenar')}
             className="mb-2 flex h-11 w-full items-center justify-between gap-2 rounded-full bg-night px-4 text-sm font-bold text-white shadow-xl shadow-night/40"

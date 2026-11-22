@@ -45,6 +45,7 @@ import {
   type DeviceSong,
 } from '../lib/deviceMusic'
 import { Btn, Field, inputCls } from './ui'
+import { IconArrowDown, IconArrowUp, IconChevronDown, IconChevronUp, IconPause, IconPlay, IconSkipBack, IconSkipForward, IconX } from './icons'
 import { startAudioService, stopAudioService, updateMedia, addMediaControlListener, audioServiceSupported, playNativeUrl, pauseNative, seekNative, getNativePosition, addPlayerEventListener } from '../lib/audioService'
 import type { MediaControlAction, PlayerEventType } from '../lib/audioService'
 import { listPlaylist, resolveVideo, ytThumbnail, checkExtractorHealth, ExtractorError, type ExtractorTrack } from '../lib/youtubeExtractor'
@@ -219,8 +220,13 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const [dragging, setDragging] = useState(false)
   const dragStartYRef = useRef(0)
   const dragYRef = useRef(0)
+  // Contenedor con scroll de la hoja (la raíz del componente cuando
+  // está expandida): al abrirla se lleva arriba, para que el tirador
+  // y el encabezado sean lo primero que se ve.
+  const sheetRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!expanded) { setSheetIn(false); setDragY(0); dragYRef.current = 0; setDragging(false); return }
+    if (sheetRef.current) sheetRef.current.scrollTop = 0
     const raf = requestAnimationFrame(() => setSheetIn(true))
     return () => cancelAnimationFrame(raf)
   }, [expanded])
@@ -1172,27 +1178,30 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         <div key={t.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${i === ytQueueIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}>
           <TrackThumb track={t} className="h-9 w-9" />
           <button onClick={() => playYtTrack(i)} className="min-w-0 flex-1 truncate text-left">
-            {i === ytQueueIndex && ytSounds ? '▶ ' : ''}{t.title}
+            {i === ytQueueIndex && ytSounds ? <IconPlay className="mr-1 inline h-3.5 w-3.5 align-middle" /> : null}{t.title}
           </button>
           {t.durationSec ? <span className="shrink-0 text-xs text-slate-400">{fmtTime(t.durationSec)}</span> : null}
-          <button onClick={() => moveYtTrack(i, -1)} disabled={i === 0} aria-label="Subir en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↑</button>
-          <button onClick={() => moveYtTrack(i, 1)} disabled={i === ytQueue.length - 1} aria-label="Bajar en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↓</button>
-          <button onClick={() => removeYtTrack(i)} aria-label="Quitar de la lista" className="shrink-0 px-1 text-base">✕</button>
+          <button onClick={() => moveYtTrack(i, -1)} disabled={i === 0} aria-label="Subir en la lista" className="inline-flex shrink-0 items-center justify-center p-1 disabled:opacity-30"><IconArrowUp className="h-4 w-4" /></button>
+          <button onClick={() => moveYtTrack(i, 1)} disabled={i === ytQueue.length - 1} aria-label="Bajar en la lista" className="inline-flex shrink-0 items-center justify-center p-1 disabled:opacity-30"><IconArrowDown className="h-4 w-4" /></button>
+          <button onClick={() => removeYtTrack(i)} aria-label="Quitar de la lista" className="inline-flex shrink-0 items-center justify-center p-1"><IconX className="h-4 w-4" /></button>
         </div>
       ))}
     </div>
   )
 
   // Una sola raíz. La hoja expandida es CASI A PANTALLA COMPLETA
-  // (~92dvh, estilo app nativa) con scroll interno. Por defecto todo
-  // es mini-barra (también en Entrenar); la hoja solo se abre al
-  // tocar ▲. Entra deslizando desde abajo (sheetIn) y se recoge
-  // arrastrando el tirador (dragY) o con el botón ⌄.
+  // (92dvh menos el borde inferior del dock — ver
+  // .pulso-player-sheet en index.css — estilo app nativa) con scroll
+  // interno. Por defecto todo es mini-barra (también en Entrenar);
+  // la hoja solo se abre al tocar ▲. Entra deslizando desde abajo
+  // (sheetIn) y se recoge arrastrando el tirador (dragY) o con el
+  // botón ⌄.
   return (
     <div
+      ref={sheetRef}
       className={!expanded
         ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
-        : 'h-[92dvh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white shadow-xl shadow-night/20 transition-transform duration-300 ease-out'}
+        : 'pulso-player-sheet overflow-y-auto rounded-t-3xl border border-slate-100 bg-white shadow-xl shadow-night/20 transition-transform duration-300 ease-out'}
       style={expanded ? { transform: dragging ? `translateY(${dragY}px)` : `translateY(${sheetIn ? 0 : 100}%)`, opacity: sheetIn || dragging ? 1 : 0 } : undefined}
     >
       {!expanded ? (
@@ -1200,10 +1209,10 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           {ytExtractorActive && <TrackThumb track={ytCurrent} className="h-12 w-12" />}
           <button
             onClick={togglePlay}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-lg font-black text-night"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-night"
             aria-label={anyPlaying ? 'Pausar música' : 'Reproducir música'}
           >
-            {anyPlaying ? '⏸' : '▶'}
+            {anyPlaying ? <IconPause className="h-5 w-5" /> : <IconPlay className="h-5 w-5" />}
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold">🎵 {miniTitle}</p>
@@ -1216,17 +1225,17 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             <>
               <button
                 onClick={() => playLocal((localIndex - 1 + localTracks.length) % localTracks.length)}
-                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2"
                 aria-label="Canción anterior"
               >
-                ⏮
+                <IconSkipBack className="h-4 w-4" />
               </button>
               <button
                 onClick={() => playLocal((localIndex + 1) % localTracks.length)}
-                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2"
                 aria-label="Siguiente canción"
               >
-                ⏭
+                <IconSkipForward className="h-4 w-4" />
               </button>
             </>
           )}
@@ -1234,26 +1243,26 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             <>
               <button
                 onClick={() => playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)}
-                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2"
                 aria-label="Canción anterior"
               >
-                ⏮
+                <IconSkipBack className="h-4 w-4" />
               </button>
               <button
                 onClick={() => playYtTrack((ytQueueIndex + 1) % ytQueue.length)}
-                className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-sm font-bold"
+                className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2"
                 aria-label="Siguiente canción"
               >
-                ⏭
+                <IconSkipForward className="h-4 w-4" />
               </button>
             </>
           )}
           <button
             onClick={() => { if (immersive || !compact) onExpandedChange?.(true); else onGoTrain?.() }}
-            className="shrink-0 rounded-full bg-white/10 px-2.5 py-2 text-xs font-bold"
+            className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2.5"
             aria-label="Expandir reproductor"
           >
-            ▲
+            <IconChevronUp className="h-4 w-4" />
           </button>
           {/* Sin botón "Entrenar →" en la mini-barra: la ▲ ya lleva a
               Entrenar en las demás pestañas, y ese botón robaba el
@@ -1275,19 +1284,22 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             <h3 className="text-base font-bold">🎵 Música para entrenar</h3>
             <button
               onClick={() => onExpandedChange?.(false)}
-              className="shrink-0 rounded-full bg-night-100 px-3 py-1.5 text-xs font-bold text-teal-dark"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-night-100 px-3 py-1.5 text-xs font-bold text-teal-dark"
               aria-label="Recoger reproductor"
             >
-              ⌄ Recoger
+              <IconChevronDown className="h-4 w-4" /> Recoger
             </button>
           </div>
 
-          {/* Portada grande + título de la canción que suena. */}
+          {/* Portada grande + título de la canción que suena. La
+              portada es 16:9 (aspect-video, ancho completo): la
+              miniatura de YouTube es 320×180 y en cuadrado con
+              object-cover se recortaban ~44 % de los lados. */}
           <div className="mt-3 flex flex-col items-center">
             {source === 'youtube' && ytCurrent ? (
-              <TrackThumb track={ytCurrent} className="h-56 w-56 rounded-3xl" />
+              <TrackThumb track={ytCurrent} className="aspect-video w-full max-w-md rounded-3xl" />
             ) : (
-              <div className="flex h-56 w-56 items-center justify-center rounded-3xl bg-teal/10 text-6xl">🎵</div>
+              <div className="flex aspect-video w-full max-w-md items-center justify-center rounded-3xl bg-teal/10 text-6xl">🎵</div>
             )}
             <p className="mt-3 w-full truncate text-center text-lg font-bold">
               {source === 'youtube' ? (ytCurrent?.title ?? 'Sin canción') : currentLocal ? cleanTrackName(currentLocal.name) : 'Sin canción'}
@@ -1309,17 +1321,17 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   else if (ytQueue.length > 1) playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)
                 }}
                 disabled={source === 'local' ? localTracks.length < 2 : ytQueue.length < 2}
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 text-2xl disabled:opacity-30"
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 disabled:opacity-30"
                 aria-label="Canción anterior"
               >
-                ⏮
+                <IconSkipBack className="h-7 w-7" />
               </button>
               <button
                 onClick={togglePlay}
-                className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-pulso text-3xl font-black text-night"
+                className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-pulso text-night"
                 aria-label={anyPlaying ? 'Pausar música' : 'Reproducir música'}
               >
-                {anyPlaying ? '⏸' : '▶'}
+                {anyPlaying ? <IconPause className="h-9 w-9" /> : <IconPlay className="h-9 w-9" />}
               </button>
               <button
                 onClick={() => {
@@ -1327,10 +1339,10 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   else if (ytQueue.length > 1) playYtTrack((ytQueueIndex + 1) % ytQueue.length)
                 }}
                 disabled={source === 'local' ? localTracks.length < 2 : ytQueue.length < 2}
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 text-2xl disabled:opacity-30"
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 disabled:opacity-30"
                 aria-label="Siguiente canción"
               >
-                ⏭
+                <IconSkipForward className="h-7 w-7" />
               </button>
             </div>
           </div>
@@ -1338,9 +1350,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => switchSource('youtube')}
-              className={`flex-1 rounded-full px-3 py-2 text-sm font-semibold ${source === 'youtube' ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold ${source === 'youtube' ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}
             >
-              ▶ YouTube
+              <IconPlay className="h-4 w-4" /> YouTube
             </button>
             <button
               onClick={() => switchSource('local')}
@@ -1397,7 +1409,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               {presetButtons}
               <div className="flex items-center gap-2">
                 <Btn variant="teal" className="flex-1" onClick={() => void openExternalUrl(ytCurrent ? `https://www.youtube.com/watch?v=${ytCurrent.id}` : externalUrl(preset, custom))}>
-                  ▶ Abrir en YouTube
+                  <IconPlay className="mr-1.5 inline h-4 w-4 align-middle" /> Abrir en YouTube
                 </Btn>
               </div>
               {customField}
@@ -1449,7 +1461,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                         onClick={() => playLocal(i)}
                         className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm ${i === localIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}
                       >
-                        <span className="min-w-0 truncate">{i === localIndex ? '▶ ' : ''}{cleanTrackName(t.name)}</span>
+                        <span className="min-w-0 truncate">{i === localIndex ? <IconPlay className="mr-1 inline h-3.5 w-3.5 align-middle" /> : null}{cleanTrackName(t.name)}</span>
                         {t.durationMs ? <span className="shrink-0 text-xs text-slate-400">{formatDuration(t.durationMs)}</span> : null}
                       </button>
                     ))}
