@@ -31,7 +31,7 @@ export interface GpsProgress { active: boolean; status: 'idle' | 'recording' | '
 
 const GPS_SAVED_KEY = 'pulso_local_gps_in_progress'
 
-interface SavedGps { sport: string; seconds: number; distanceKm: number; points: Point[]; savedAt: number; steps?: number }
+interface SavedGps { sport: string; seconds: number; distanceKm: number; points: Point[]; savedAt: number; steps?: number; startedAt?: number; pausedTotalMs?: number }
 
 function loadSavedGps(): SavedGps | null {
   try {
@@ -164,11 +164,27 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   const stillWindowStart = useRef<number>(0)
   const stillWindowDistKm = useRef<number>(0)
   const autoPausedRef = useRef(false)
+  // Cronómetro por reloj (fix pantalla apagada): el intervalo de 1 s
+  // solo refresca la pantalla; el tiempo real se calcula desde
+  // startedAt menos el tiempo acumulado en pausa. Con la pantalla
+  // apagada el WebView duerme y el intervalo no corre, pero al volver
+  // el siguiente tick salta al valor correcto. Al restaurar una
+  // sesión guardada (que queda en pausa), pausedAtRef es savedAt para
+  // que el hueco hasta reanudar no se cuente como grabación.
+  const startedAtRef = useRef<number | null>(saved?.startedAt ?? (saved ? saved.savedAt - (saved.seconds || 0) * 1000 : null))
+  const pausedTotalRef = useRef(saved?.pausedTotalMs ?? 0)
+  const pausedAtRef = useRef<number | null>(saved ? saved.savedAt : null)
 
-  // Cronómetro
+  // Cronómetro por reloj: el intervalo solo refresca la pantalla; el
+  // tiempo se calcula desde startedAt menos la pausa acumulada.
   useEffect(() => {
     if (status !== 'recording') return
-    const t = setInterval(() => setSeconds((s) => s + 1), 1000)
+    const tick = () => {
+      if (startedAtRef.current == null) return
+      setSeconds(Math.max(0, Math.floor((Date.now() - startedAtRef.current - pausedTotalRef.current) / 1000)))
+    }
+    tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
   }, [status])
 
@@ -296,7 +312,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   useEffect(() => {
     try {
       if (status === 'recording' || status === 'paused') {
-        localStorage.setItem(GPS_SAVED_KEY, JSON.stringify({ sport, seconds, distanceKm, points, steps, savedAt: Date.now() }))
+        localStorage.setItem(GPS_SAVED_KEY, JSON.stringify({ sport, seconds, distanceKm, points, steps, savedAt: Date.now(), startedAt: startedAtRef.current ?? undefined, pausedTotalMs: pausedTotalRef.current }))
       } else {
         localStorage.removeItem(GPS_SAVED_KEY)
       }
@@ -493,6 +509,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     // distancia. Ahora sí se detiene el GPS hasta reanudar.
     stopWatch()
     stopStepSession()
+    pausedAtRef.current = Date.now()
     setStatus('paused')
   }
 
@@ -537,6 +554,14 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
     requestFirstFix(
       (p) => {
+        // La pausa no suma tiempo: el tramo en pausa se acumula y se
+        // descuenta del reloj (incluye el hueco si la sesión se
+        // restauró de localStorage en pausa).
+        if (pausedAtRef.current != null) {
+          pausedTotalRef.current += Date.now() - pausedAtRef.current
+          pausedAtRef.current = null
+        }
+        if (startedAtRef.current == null) startedAtRef.current = Date.now() - seconds * 1000 - pausedTotalRef.current
         // Si hay ruta guardada, se sigue desde ahí sin borrar nada;
         // si no, este es el primer punto.
         if (points.length === 0) setPoints([p])
@@ -556,6 +581,11 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     if (stepsOn && sport !== 'Ciclismo') void requestMotionPermission()
     requestFirstFix(
       (p) => {
+        // Arranque nuevo: el reloj empieza de cero.
+        startedAtRef.current = Date.now()
+        pausedTotalRef.current = 0
+        pausedAtRef.current = null
+        setSeconds(0)
         setPoints([p])
         setCurrentPos(p)
         setStatus('recording')
@@ -760,7 +790,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
           <Btn variant="coral" className="w-full" onClick={() => onSave({ sport, durationMin: Math.max(1, Math.round(minutes)), distanceKm: Math.round(distanceKm * 100) / 100, route: points, steps: steps > 0 ? steps : undefined })}>
             Guardar entrenamiento
           </Btn>
-          <button className="w-full text-center text-sm text-slate-500 underline" onClick={() => { setStatus('idle'); setSeconds(0); setDistanceKm(0); setPoints([]); setSteps(0); stepsRef.current = 0 }}>
+          <button className="w-full text-center text-sm text-slate-500 underline" onClick={() => { setStatus('idle'); setSeconds(0); setDistanceKm(0); setPoints([]); setSteps(0); stepsRef.current = 0; startedAtRef.current = null; pausedTotalRef.current = 0; pausedAtRef.current = null }}>
             Descartar y volver a grabar
           </button>
         </div>

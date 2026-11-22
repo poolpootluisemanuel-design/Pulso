@@ -79,4 +79,8 @@
          (FOREGROUND_SERVICE_LOCATION) lo declara el plugin de GPS. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Wake lock del reproductor (ExoPlayer WAKE_MODE_NETWORK): mantiene
+         CPU y WiFi despiertos mientras suena con la pantalla apagada.
+         Permiso normal, sin diálogo en tiempo de ejecución. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

@@ -147,6 +147,11 @@ public class PulsoAudioPlugin extends Plugin {
         if (player != null) return;
         Context ctx = getContext();
         ExoPlayer p = new ExoPlayer.Builder(ctx).build();
+        // Pantalla apagada: sin wake mode el reproductor no mantiene
+        // despiertos CPU ni WiFi y el stream remoto se corta al apagar
+        // la pantalla. NETWORK mantiene ambos mientras carga y suena;
+        // el lock se suelta solo al pausar o parar.
+        p.setWakeMode(C.WAKE_MODE_NETWORK);
         AudioAttributes attrs = new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.CONTENT_TYPE_MUSIC)
