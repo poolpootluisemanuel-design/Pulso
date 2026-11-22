@@ -4,9 +4,10 @@
 // segundo plano con el servicio en primer plano. Solo resuelve: el
 // teléfono baja el audio directo de googlevideo, sin descargas ni
 // proxy. Si el servidor no responde, pide clave y no hay, o devuelve
-// error, se lanza una excepción y el reproductor muestra el aviso
-// con "Probar de nuevo" (ver MusicPlayer). Ya NO hay video
-// incrustado de respaldo: el embed se quitó por completo.
+// error, se lanza un ExtractorError con su tipo para que el
+// reproductor lo diagnostique en palabras simples y lo reintente
+// (ver MusicPlayer). Ya NO hay video incrustado de respaldo: el embed
+// se quitó por completo.
 export interface ExtractorTrack {
   id: string
   title: string
@@ -21,6 +22,28 @@ export interface ResolvedAudio {
   author?: string
   durationSec?: number
   thumbnail?: string
+}
+
+/** Por qué falló una llamada al extractor (para el diagnóstico). */
+export type ExtractorErrorKind =
+  | 'offline' // sin red (el fetch ni salió)
+  | 'server' // el servidor no responde o devuelve 5xx sin ser bloqueo
+  | 'blocked' // YouTube bloqueó el video (502 "Sign in to confirm…")
+  | 'key' // 401: clave no válida
+  | 'resolve' // el video no se pudo resolver (sin URL, lista vacía…)
+  | 'network' // error de red / timeout (se clasifica en MusicPlayer)
+
+export class ExtractorError extends Error {
+  kind: ExtractorErrorKind
+  status?: number
+  code: string
+  constructor(kind: ExtractorErrorKind, message: string, status?: number, code?: string) {
+    super(message)
+    this.name = 'ExtractorError'
+    this.kind = kind
+    this.status = status
+    this.code = code ?? (status !== undefined ? `extractor ${status}` : 'error')
+  }
 }
 
 // Dirección pública del extractor; se puede cambiar por build con
@@ -38,9 +61,39 @@ export function ytThumbnail(id: string): string {
 async function fetchExtractor(path: string): Promise<unknown> {
   const headers: Record<string, string> = {}
   if (EXTRACTOR_KEY) headers['x-pulso-key'] = EXTRACTOR_KEY
-  const res = await fetch(`${EXTRACTOR_URL}${path}`, { headers })
-  if (!res.ok) throw new Error(`extractor ${res.status}`)
+  let res: Response
+  try {
+    res = await fetch(`${EXTRACTOR_URL}${path}`, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (err) {
+    // Sin red o timeout: el reproductor distingue sin internet
+    // (navigator.onLine) de servidor sin respuesta.
+    throw new ExtractorError('network', 'extractor sin respuesta', undefined, err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'red')
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    if (res.status === 401) throw new ExtractorError('key', 'extractor 401', 401)
+    if (res.status === 502 && /sign in to confirm|not a bot/i.test(body)) {
+      throw new ExtractorError('blocked', 'extractor 502: YouTube bloqueó el video', 502)
+    }
+    if (res.status >= 500) throw new ExtractorError('server', `extractor ${res.status}`, res.status)
+    throw new ExtractorError('resolve', `extractor ${res.status}`, res.status)
+  }
   return res.json() as Promise<unknown>
+}
+
+/** ¿Responde el servidor del extractor? (diagnóstico: /health). */
+export async function checkExtractorHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${EXTRACTOR_URL}/health`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return false
+    const data = (await res.json()) as { ok?: unknown }
+    return data.ok === true
+  } catch {
+    return false
+  }
 }
 
 /** Resuelve un video a su URL directa de audio. */
@@ -51,7 +104,7 @@ export async function resolveVideo(id: string): Promise<ResolvedAudio> {
     author?: string
     duration?: number
   }
-  if (!data.url) throw new Error('extractor sin URL de audio')
+  if (!data.url) throw new ExtractorError('resolve', 'extractor sin URL de audio')
   return {
     url: data.url,
     title: data.title || 'Video de YouTube',
@@ -66,7 +119,7 @@ export async function listPlaylist(id: string): Promise<ExtractorTrack[]> {
   const data = (await fetchExtractor(`/playlist?id=${encodeURIComponent(id)}`)) as {
     videos?: { id: string; title?: string; author?: string; duration?: number }[]
   }
-  if (!Array.isArray(data.videos)) throw new Error('extractor sin lista de videos')
+  if (!Array.isArray(data.videos)) throw new ExtractorError('resolve', 'extractor sin lista de videos')
   return data.videos
     .filter((v) => v.id)
     .map((v) => ({

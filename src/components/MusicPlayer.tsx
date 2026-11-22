@@ -20,8 +20,10 @@
 // - Este componente vive MONTADO EN App.tsx, fuera de las pestañas:
 //   nunca se oculta con display:none. Por defecto es una MINI-BARRA
 //   fija y pequeña en todas las pestañas (también en Entrenar); solo
-//   se expande a una hoja baja (40vh) cuando Luis la abre, y se recoge
-//   sola al cambiar de pestaña. El audio sigue sonando al recogerla.
+//   se expande a una hoja CASI A PANTALLA COMPLETA (~92vh, estilo
+//   app nativa: portada grande, controles grandes, se recoge con ⌄
+//   o arrastrando el tirador) cuando Luis la abre, y se recoge sola
+//   al cambiar de pestaña. El audio sigue sonando al recogerla.
 // - Segundo plano (app nativa): mientras suena, el reproductor nativo
 //   mantiene un servicio en primer plano ("PULSO · Sonando") para que
 //   el audio siga al salir de la app o con la pantalla apagada. En web
@@ -29,7 +31,7 @@
 // - "Abrir en YouTube" usa el plugin @capacitor/browser: window.open
 //   con '_blank' se ignora en la WebView de Capacitor y el botón no
 //   abría nada (ver lib/openExternal.ts).
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
 import { getMusicPref, saveMusicPref } from '../lib/store'
 import {
   clearCachedDeviceSongs,
@@ -45,8 +47,9 @@ import {
 import { Btn, Field, inputCls } from './ui'
 import { startAudioService, stopAudioService, updateMedia, addMediaControlListener, audioServiceSupported, playNativeUrl, pauseNative, seekNative, getNativePosition, addPlayerEventListener } from '../lib/audioService'
 import type { MediaControlAction, PlayerEventType } from '../lib/audioService'
-import { listPlaylist, resolveVideo, ytThumbnail, type ExtractorTrack } from '../lib/youtubeExtractor'
+import { listPlaylist, resolveVideo, ytThumbnail, checkExtractorHealth, ExtractorError, type ExtractorTrack } from '../lib/youtubeExtractor'
 import { openExternalUrl } from '../lib/openExternal'
+import { APP_BUILD } from '../lib/appUpdate'
 
 // Videos reales de YouTube por deporte (mixes largos, públicos).
 // NO inventar IDs: si se cambia uno, verificarlo igual antes de subirlo.
@@ -159,13 +162,15 @@ function TrackThumb({ track, className }: { track: ExtractorTrack | null; classN
   return <img src={track.thumbnail} alt="" onError={() => setFailed(true)} className={`shrink-0 rounded-lg object-cover ${className ?? 'h-12 w-20'}`} />
 }
 
-/** Barrita de minutos: actual / total, tocable para adelantar. */
-function SeekBar({ current, total, onSeek, dark }: { current: number; total: number; onSeek: (frac: number) => void; dark?: boolean }) {
+/** Barrita de minutos: actual / total, tocable para adelantar.
+ *  `large` es la del reproductor expandido estilo app: barra más
+ *  gruesa y tiempos más grandes. */
+function SeekBar({ current, total, onSeek, dark, large }: { current: number; total: number; onSeek: (frac: number) => void; dark?: boolean; large?: boolean }) {
   const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0
   return (
     <div>
       <div
-        className={`h-1.5 w-full cursor-pointer rounded-full ${dark ? 'bg-white/20' : 'bg-slate-200'}`}
+        className={`${large ? 'h-2.5' : 'h-1.5'} w-full cursor-pointer rounded-full ${dark ? 'bg-white/20' : 'bg-slate-200'}`}
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onSeek(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))) }}
         role="slider"
         aria-label="Adelantar en la canción"
@@ -174,7 +179,7 @@ function SeekBar({ current, total, onSeek, dark }: { current: number; total: num
       >
         <div className="h-full rounded-full bg-pulso" style={{ width: `${pct}%` }} />
       </div>
-      <div className={`mt-0.5 flex justify-between text-[11px] ${dark ? 'text-white/60' : 'text-slate-500'}`}>
+      <div className={`mt-0.5 flex justify-between ${large ? 'text-sm' : 'text-[11px]'} ${dark ? 'text-white/60' : 'text-slate-500'}`}>
         <span>{fmtTime(current)}</span>
         <span>{fmtTime(total)}</span>
       </div>
@@ -205,6 +210,39 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const [customErr, setCustomErr] = useState('')
   const [keepScreenOn, setKeepScreenOn] = useState(true)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+
+  // Hoja estilo app: entra deslizando desde abajo; el tirador permite
+  // recogerla arrastrando, pero el botón ⌄ es el camino principal y
+  // debe funcionar siempre.
+  const [sheetIn, setSheetIn] = useState(false)
+  const [dragY, setDragY] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const dragStartYRef = useRef(0)
+  const dragYRef = useRef(0)
+  useEffect(() => {
+    if (!expanded) { setSheetIn(false); setDragY(0); dragYRef.current = 0; setDragging(false); return }
+    const raf = requestAnimationFrame(() => setSheetIn(true))
+    return () => cancelAnimationFrame(raf)
+  }, [expanded])
+
+  // Gesto: arrastrar el tirador hacia abajo recoge la hoja (umbral
+  // 90 px); si no llega, vuelve a su sitio. El botón ⌄ sigue siendo
+  // el camino principal.
+  function handleDragStart(e: ReactTouchEvent) {
+    dragStartYRef.current = e.touches[0].clientY
+    dragYRef.current = 0
+    setDragging(true)
+  }
+  function handleDragMove(e: ReactTouchEvent) {
+    const dy = Math.max(0, e.touches[0].clientY - dragStartYRef.current)
+    dragYRef.current = dy
+    setDragY(dy)
+  }
+  function handleDragEnd() {
+    setDragging(false)
+    if (dragYRef.current >= 90) onExpandedChange?.(false)
+    else { setDragY(0); dragYRef.current = 0 }
+  }
 
   // Al cambiar de pestaña (compact) la hoja se recoge sola a
   // mini-barra: la música sigue sonando, pero no tapa el contenido
@@ -289,12 +327,56 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const [ytQueueIndex, setYtQueueIndex] = useState(0)
   const [ytAudioUrl, setYtAudioUrl] = useState<string | null>(null)
   const [ytResolving, setYtResolving] = useState(false)
-  const [ytExtractErr, setYtExtractErr] = useState('')
   const [ytRetry, setYtRetry] = useState(0)
   // Tiempo del <audio> para la barrita de minutos (modo extractor).
   const [ytTime, setYtTime] = useState({ current: 0, duration: 0 })
   // Para qué video ya se resolvió ytAudioUrl (resolver perezoso).
   const ytResolvedForRef = useRef<string | null>(null)
+
+  // AUTO-DIAGNÓSTICO (falla del extractor): cuando un resolve o la
+  // reproducción fallan, la app clasifica el error, lo dice en
+  // palabras simples, reintenta sola (el bloqueo de YouTube es
+  // intermitente) y si no se arregla ofrece reportar a soporte.
+  // `network` no tiene diagnóstico propio: sin internet es 'offline'
+  // y con internet es 'server'.
+  type YtDiagKind = 'offline' | 'server' | 'blocked' | 'key' | 'resolve'
+  interface YtDiag { kind: YtDiagKind; code: string; at: number }
+  const YT_DIAG_TEXT: Record<YtDiagKind, string> = {
+    offline: 'No tienes internet.',
+    server: 'El servidor del extractor no responde.',
+    blocked: 'YouTube bloqueó este video por ahora.',
+    key: 'La clave del extractor no es válida.',
+    resolve: 'No se pudo resolver el video.',
+  }
+  const [ytDiag, setYtDiag] = useState<YtDiag | null>(null)
+  // ¿Responde el servidor? null = revisando aún.
+  const [diagServerOk, setDiagServerOk] = useState<boolean | null>(null)
+  const [diagRetrying, setDiagRetrying] = useState(false)
+  const [diagAllFailed, setDiagAllFailed] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [reportCopied, setReportCopied] = useState(false)
+  // Reintentos automáticos por canción (máx. 2: a los 5 s y 15 s) y
+  // canciones que ya fallaron en esta racha (para pasar a la
+  // siguiente y detectar si TODA la lista falló).
+  const ytAutoRetryCountRef = useRef(0)
+  const ytAutoRetryTimersRef = useRef<number[]>([])
+  const ytFailedIdsRef = useRef<Set<string>>(new Set())
+
+  // ¿Suena DE VERDAD? `playing` solo dice la intención: con el
+  // extractor fallando o el stream atascado, playing era true y la
+  // cola decía "Sonando…" sin sonar nada. `ytAudible` solo se pone
+  // true con evidencia (la posición nativa avanza o el <audio> suena).
+  // `ytStalled` marca que sonaba y dejó de avanzar: ahí se dispara
+  // el diagnóstico como si el resolve hubiera fallado.
+  const [ytAudible, setYtAudible] = useState(false)
+  const [ytStalled, setYtStalled] = useState(false)
+  const ytAudibleRef = useRef(false)
+  const ytStalledRef = useRef(false)
+  const ytLastPosRef = useRef(0)
+  const ytStallPollsRef = useRef(0)
+  const ytCurrentIdRef = useRef<string | null>(null)
+  const ytStallHandlerRef = useRef<() => void>(() => undefined)
+  useEffect(() => { ytCurrentIdRef.current = ytQueue[ytQueueIndex]?.id ?? null }, [ytQueue, ytQueueIndex])
   // Espejo de `source` para los handlers del <audio>.
   const sourceRef = useRef<'youtube' | 'local'>('youtube')
   useEffect(() => { sourceRef.current = source }, [source])
@@ -305,10 +387,25 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   const title = useCustom ? (pref.customLabel || 'Mi playlist de YouTube') : `Música para ${preset.label.toLowerCase()}`
   const currentLocal = localTracks[localIndex] || null
   const anyPlaying = playing || localPlaying
+  // Estado real de YouTube para la UI: "Sonando…" solo con evidencia
+  // de audio (ytAudible); "No está sonando" si se atascó; "Cargando…"
+  // mientras arranca; "Resolviendo…" mientras pide la URL.
+  const ytSounds = playing && ytAudible
+  function ytStatusText(): string {
+    if (!playing) return 'En pausa'
+    if (ytResolving) return 'Resolviendo…'
+    if (ytAudible) return 'Sonando…'
+    if (ytStalled) return 'No está sonando'
+    return 'Cargando…'
+  }
   // YouTube = extractor (único modo, sin embed): la canción que
   // suena es la de la cola.
   const ytExtractorActive = source === 'youtube'
   const ytCurrent = ytQueue[ytQueueIndex] ?? null
+  // Total para la barrita grande del reproductor expandido.
+  const bigSeekTotal = source === 'local'
+    ? ytTime.duration || (currentLocal?.durationMs ? currentLocal.durationMs / 1000 : 0)
+    : ytTime.duration || ytCurrent?.durationSec || 0
   const statusTitle = source === 'local' && currentLocal
     ? cleanTrackName(currentLocal.name)
     : ytExtractorActive && ytCurrent ? ytCurrent.title : title
@@ -419,17 +516,79 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
 
   // Barrita de minutos con el reproductor nativo: la posición se
   // pregunta cada medio segundo (el <audio> no suena en nativo y su
-  // onTimeUpdate no dispara). Sirve para local y para YouTube.
+  // onTimeUpdate no dispara). Sirve para local y para YouTube. En
+  // YouTube además es la evidencia de que suena DE VERDAD: la
+  // posición avanza solo si el audio avanza; 3 s sin avance con
+  // intención de sonar = atascado, y ahí se dispara el diagnóstico
+  // como si el resolve hubiera fallado.
   useEffect(() => {
     if (!useNativePlayer || !anyPlaying) return
     const id = window.setInterval(() => {
       void getNativePosition().then((p) => {
         if (!p) return
-        setYtTime({ current: p.positionMs / 1000, duration: p.durationMs > 0 ? p.durationMs / 1000 : 0 })
+        const pos = p.positionMs / 1000
+        setYtTime({ current: pos, duration: p.durationMs > 0 ? p.durationMs / 1000 : 0 })
+        if (sourceRef.current === 'youtube' && ytCurrentIdRef.current) {
+          if (pos > ytLastPosRef.current + 0.2) {
+            ytLastPosRef.current = pos
+            ytStallPollsRef.current = 0
+            if (!ytAudibleRef.current) { ytAudibleRef.current = true; setYtAudible(true) }
+            if (ytStalledRef.current) { ytStalledRef.current = false; setYtStalled(false) }
+          } else {
+            ytStallPollsRef.current += 1
+            if (ytStallPollsRef.current >= 6 && ytAudibleRef.current) {
+              ytAudibleRef.current = false
+              setYtAudible(false)
+              ytStalledRef.current = true
+              setYtStalled(true)
+              ytStallHandlerRef.current()
+            }
+          }
+        }
       })
     }, 500)
     return () => window.clearInterval(id)
   }, [anyPlaying, useNativePlayer])
+
+  // Al atascarse el audio (sonaba y dejó de avanzar), diagnosticarlo
+  // como fallo de resolve: el reintento vuelve a resolver la URL.
+  useEffect(() => {
+    ytStallHandlerRef.current = () => {
+      if (!playingRef.current) return
+      handleYtFailure(new ExtractorError('resolve', 'El audio se detuvo.', undefined, 'sin avance'))
+    }
+  })
+
+  // Al cambiar de canción (a mano o por auto-avance), el intento
+  // nuevo parte de cero: sin diagnóstico viejo, sin reintentos
+  // pendientes y sin atasco.
+  useEffect(() => {
+    ytAutoRetryCountRef.current = 0
+    clearAutoRetryTimers()
+    setYtAudible(false)
+    ytAudibleRef.current = false
+    setYtStalled(false)
+    ytStalledRef.current = false
+    ytLastPosRef.current = 0
+    ytStallPollsRef.current = 0
+    setYtDiag(null)
+    setDiagAllFailed(false)
+    setShowReport(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ytQueue[ytQueueIndex]?.id])
+
+  // Sin intención de sonar no hay evidencia de audio.
+  useEffect(() => {
+    if (!anyPlaying) {
+      setYtAudible(false)
+      ytAudibleRef.current = false
+    }
+  }, [anyPlaying])
+
+  // Limpiar los reintentos automáticos al desmontar.
+  useEffect(() => () => {
+    ytAutoRetryTimersRef.current.forEach((t) => window.clearTimeout(t))
+  }, [])
 
   // El reproductor nativo avisa cuando termina la canción o falla:
   // avanzar la cola igual que el onEnded del <audio>, o avisar si
@@ -448,8 +607,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         }
       } else if (ev.type === 'error') {
         if (sourceRef.current === 'youtube') {
-          setYtExtractErr('El reproductor no pudo sonar este audio. Toca "Probar de nuevo" para reintentarlo.')
-          setPlaying(false)
+          handleYtFailure(new ExtractorError('resolve', 'El reproductor no pudo sonar este audio.', undefined, 'reproductor'))
         } else {
           setLocalPlaying(false)
         }
@@ -467,13 +625,122 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     return () => { cancelled = true; void handle?.remove() }
   }, [useNativePlayer])
 
-  // Si el extractor falla se muestra el aviso: "Probar de nuevo"
-  // limpia el error y re-dispara la resolución (ytRetry).
-  function retryExtractor() {
-    setYtExtractErr('')
+  // --- Auto-diagnóstico del extractor ---
+  function clearAutoRetryTimers() {
+    ytAutoRetryTimersRef.current.forEach((t) => window.clearTimeout(t))
+    ytAutoRetryTimersRef.current = []
+    setDiagRetrying(false)
+  }
+
+  function classifyExtractorError(err: unknown): YtDiagKind {
+    if (err instanceof ExtractorError) {
+      if (err.kind === 'network') return navigator.onLine ? 'server' : 'offline'
+      if (err.kind === 'blocked' || err.kind === 'key' || err.kind === 'resolve' || err.kind === 'server') return err.kind
+      return 'resolve'
+    }
+    return navigator.onLine ? 'resolve' : 'offline'
+  }
+
+  // Un fallo de YouTube (resolve o reproducción): clasificarlo,
+  // mostrarlo en palabras simples y, si el usuario quería sonar,
+  // reintentarlo solo (2 veces: 5 s y 15 s; el bloqueo es
+  // intermitente) y si no, pasar a la siguiente canción; si TODA la
+  // lista falló, ofrecer la música local. Con auto=false solo se
+  // muestra el diagnóstico (agregar un link fallido). La intención
+  // de sonar NO se apaga: si se apagara, el reintento resolvería la
+  // URL pero nada volvería a sonar.
+  function handleYtFailure(err: unknown, auto = true) {
+    const track = ytCurrent
+    const kind = classifyExtractorError(err)
+    const code = err instanceof ExtractorError ? err.code : err instanceof Error ? err.message : 'error'
+    setYtDiag({ kind, code, at: Date.now() })
+    setDiagServerOk(null)
+    void checkExtractorHealth().then((ok) => setDiagServerOk(ok)).catch(() => setDiagServerOk(false))
+    if (!auto || !playingRef.current || !track) return
+    ytAutoRetryCountRef.current += 1
+    const n = ytAutoRetryCountRef.current
+    if (n <= 2) {
+      const delay = n === 1 ? 5000 : 15000
+      setDiagRetrying(true)
+      const t = window.setTimeout(() => {
+        if (!playingRef.current) return
+        if (ytCurrentIdRef.current !== track.id) return
+        setDiagRetrying(false)
+        retryExtractorAuto()
+      }, delay)
+      ytAutoRetryTimersRef.current.push(t)
+      return
+    }
+    ytFailedIdsRef.current.add(track.id)
+    setDiagRetrying(false)
+    const nextIdx = ytQueue.findIndex((t) => !ytFailedIdsRef.current.has(t.id))
+    if (nextIdx >= 0) playYtTrack(nextIdx)
+    else {
+      setDiagAllFailed(true)
+      setPlaying(false)
+    }
+  }
+
+  // Reintento automático (sin resetear el contador ni los fallidos:
+  // eso es solo del reintento manual).
+  function retryExtractorAuto() {
+    clearAutoRetryTimers()
+    setYtDiag(null)
+    setShowReport(false)
+    setYtStalled(false)
+    ytStalledRef.current = false
+    setYtAudible(false)
+    ytAudibleRef.current = false
     setYtAudioUrl(null)
     ytResolvedForRef.current = null
     setYtRetry((n) => n + 1)
+  }
+
+  // "Probar de nuevo" (manual): intento fresco — limpia el error, el
+  // diagnóstico, los reintentos automáticos y la lista de fallidos, y
+  // re-dispara la resolución (ytRetry).
+  function retryExtractor() {
+    ytAutoRetryCountRef.current = 0
+    ytFailedIdsRef.current.clear()
+    setDiagAllFailed(false)
+    retryExtractorAuto()
+  }
+
+  // Texto del reporte a soporte (sin datos personales ni claves).
+  function supportReportText(): string {
+    const track = ytCurrent
+    const cause = ytDiag ? `${YT_DIAG_TEXT[ytDiag.kind]} (${ytDiag.code})` : 'El extractor no respondió.'
+    const when = new Date(ytDiag?.at ?? Date.now())
+    const dateStr = when.toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    return [
+      'La música de YouTube no sonó.',
+      track ? `Video: ${track.title} (${ytQueueIndex + 1} de ${ytQueue.length}).` : 'Video: (sin canción).',
+      `Error: ${cause}`,
+      `Hora: ${dateStr}.`,
+      `App: build ${APP_BUILD}.`,
+    ].join('\n')
+  }
+
+  // Abrir la hoja de compartir con el reporte; si no hay compartir,
+  // copiarlo al portapapeles; si tampoco se puede, el texto ya se ve
+  // en la tarjeta para copiarlo a mano. Si el usuario cancela la
+  // hoja, no se hace nada más.
+  async function shareSupportReport() {
+    const text = supportReportText()
+    const nav = navigator as Navigator & { share?: (data: { title?: string; text?: string }) => Promise<void> }
+    if (typeof nav.share === 'function') {
+      try {
+        await nav.share({ title: 'PULSO · Reporte de música', text })
+      } catch { /* cancelado por el usuario: no hacer nada más */ }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setReportCopied(true)
+      window.setTimeout(() => setReportCopied(false), 3000)
+    } catch {
+      setReportCopied(false)
+    }
   }
 
   // La cola se guarda en este teléfono al cambiar.
@@ -495,7 +762,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     if (ytResolvedForRef.current === track.id && ytAudioUrl) return
     let cancelled = false
     setYtResolving(true)
-    setYtExtractErr('')
     resolveVideo(track.id)
       .then((r) => {
         if (cancelled) return
@@ -505,12 +771,18 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           setYtQueue((q) => q.map((t) => (t.id === track.id ? { ...t, title: r.title, durationSec: r.durationSec ?? t.durationSec } : t)))
         }
         setYtResolving(false)
+        // Resolvió: intento nuevo, sin diagnóstico ni fallidos.
+        ytAutoRetryCountRef.current = 0
+        ytFailedIdsRef.current.delete(track.id)
+        setYtDiag(null)
+        setDiagAllFailed(false)
+        setYtStalled(false)
+        ytStalledRef.current = false
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return
         setYtResolving(false)
-        setYtExtractErr('El extractor no respondió. Toca "Probar de nuevo" para reintentarlo.')
-        setPlaying(false)
+        handleYtFailure(err)
       })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -635,8 +907,8 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         setYtQueueIndex(ytQueue.length)
         setPlaying(true)
       }
-    } catch {
-      setYtExtractErr('El extractor no respondió al agregar tu link. Toca "Probar de nuevo" para reintentarlo.')
+    } catch (err) {
+      handleYtFailure(err, false)
     } finally {
       setYtResolving(false)
     }
@@ -709,6 +981,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   function addYtTrack(track: ExtractorTrack) {
     const at = ytQueue.findIndex((t) => t.id === track.id)
     if (at >= 0) { playYtTrack(at); return }
+    ytFailedIdsRef.current.delete(track.id)
     const index = ytQueue.length
     setYtQueue([...ytQueue, track])
     setYtQueueIndex(index)
@@ -717,6 +990,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
 
   function removeYtTrack(index: number) {
     const currentId = ytCurrent?.id
+    ytFailedIdsRef.current.delete(ytQueue[index]?.id)
     const next = ytQueue.filter((_, i) => i !== index)
     setYtQueue(next)
     let newIndex = ytQueueIndex
@@ -748,6 +1022,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
   function tapPreset(p: Preset) {
     update({ presetId: p.id, customUrl: '' })
     setCustomInput('')
+    ytFailedIdsRef.current.delete(p.videoId)
     const at = ytQueue.findIndex((t) => t.id === p.videoId)
     if (at >= 0) { playYtTrack(at); return }
     const track: ExtractorTrack = { id: p.videoId, title: `Música para ${p.label.toLowerCase()}`, thumbnail: ytThumbnail(p.videoId) }
@@ -837,6 +1112,11 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
       setLocalPlaying(false)
     } else {
       setPlaying(false)
+      // Al salir de YouTube el diagnóstico ya no aplica.
+      clearAutoRetryTimers()
+      setYtDiag(null)
+      setDiagAllFailed(false)
+      setShowReport(false)
     }
     setSource(next)
   }
@@ -892,7 +1172,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         <div key={t.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${i === ytQueueIndex ? 'bg-teal/10 font-bold text-teal-dark' : 'bg-sage-50 text-slate-700'}`}>
           <TrackThumb track={t} className="h-9 w-9" />
           <button onClick={() => playYtTrack(i)} className="min-w-0 flex-1 truncate text-left">
-            {i === ytQueueIndex ? '▶ ' : ''}{t.title}
+            {i === ytQueueIndex && ytSounds ? '▶ ' : ''}{t.title}
           </button>
           {t.durationSec ? <span className="shrink-0 text-xs text-slate-400">{fmtTime(t.durationSec)}</span> : null}
           <button onClick={() => moveYtTrack(i, -1)} disabled={i === 0} aria-label="Subir en la lista" className="shrink-0 px-1 text-base disabled:opacity-30">↑</button>
@@ -903,16 +1183,21 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
     </div>
   )
 
-  // Una sola raíz. La hoja expandida es BAJA: max-h-[40vh] con scroll
-  // interno. Por defecto todo es mini-barra (también en Entrenar); la
-  // hoja solo se abre al tocar ▲.
+  // Una sola raíz. La hoja expandida es CASI A PANTALLA COMPLETA
+  // (~92dvh, estilo app nativa) con scroll interno. Por defecto todo
+  // es mini-barra (también en Entrenar); la hoja solo se abre al
+  // tocar ▲. Entra deslizando desde abajo (sheetIn) y se recoge
+  // arrastrando el tirador (dragY) o con el botón ⌄.
   return (
-    <div className={!expanded
-      ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
-      : 'max-h-[40vh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white p-3 shadow-xl shadow-night/20'}>
-      {ytExtractorActive && <TrackThumb track={ytCurrent} className="h-12 w-12" />}
+    <div
+      className={!expanded
+        ? 'flex items-center gap-2 rounded-2xl bg-night px-2 py-2 text-white shadow-xl shadow-night/40'
+        : 'h-[92dvh] overflow-y-auto rounded-t-3xl border border-slate-100 bg-white shadow-xl shadow-night/20 transition-transform duration-300 ease-out'}
+      style={expanded ? { transform: dragging ? `translateY(${dragY}px)` : `translateY(${sheetIn ? 0 : 100}%)`, opacity: sheetIn || dragging ? 1 : 0 } : undefined}
+    >
       {!expanded ? (
         <>
+          {ytExtractorActive && <TrackThumb track={ytCurrent} className="h-12 w-12" />}
           <button
             onClick={togglePlay}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pulso text-lg font-black text-night"
@@ -922,7 +1207,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold">🎵 {miniTitle}</p>
-            <p className="truncate text-xs text-white/60">{anyPlaying ? 'Sonando…' : 'En pausa'} · {source === 'local' ? 'Música local' : 'YouTube'}{ytResolving ? ' · Resolviendo…' : ''}</p>
+            <p className="truncate text-xs text-white/60">{source === 'youtube' ? `${ytStatusText()} · YouTube` : `${localPlaying ? 'Sonando…' : 'En pausa'} · Música local`}</p>
             {ytExtractorActive && ytCurrent && (
               <SeekBar current={ytTime.current} total={ytTime.duration || ytCurrent.durationSec || 0} onSeek={seekYt} dark />
             )}
@@ -977,7 +1262,15 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               sale de Sesiones). */}
         </>
       ) : (
-        <div className="mt-2">
+        <div className="flex h-full flex-col px-4 pb-4 pt-1">
+          <div
+            className="touch-none select-none pb-2 pt-1"
+            onTouchStart={handleDragStart}
+            onTouchMove={handleDragMove}
+            onTouchEnd={handleDragEnd}
+          >
+            <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-300" />
+          </div>
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-base font-bold">🎵 Música para entrenar</h3>
             <button
@@ -985,15 +1278,64 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               className="shrink-0 rounded-full bg-night-100 px-3 py-1.5 text-xs font-bold text-teal-dark"
               aria-label="Recoger reproductor"
             >
-              ▼ Recoger
+              ⌄ Recoger
             </button>
           </div>
-          <div className="mt-2 space-y-3">
-          <p className="text-sm text-slate-600">
-            Sigue sonando al cambiar de pestaña y al salir de la app: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando"). Con la pantalla apagada sigue sonando todo, porque el audio sale del reproductor nativo de la app.
-          </p>
 
-          <div className="flex gap-2">
+          {/* Portada grande + título de la canción que suena. */}
+          <div className="mt-3 flex flex-col items-center">
+            {source === 'youtube' && ytCurrent ? (
+              <TrackThumb track={ytCurrent} className="h-56 w-56 rounded-3xl" />
+            ) : (
+              <div className="flex h-56 w-56 items-center justify-center rounded-3xl bg-teal/10 text-6xl">🎵</div>
+            )}
+            <p className="mt-3 w-full truncate text-center text-lg font-bold">
+              {source === 'youtube' ? (ytCurrent?.title ?? 'Sin canción') : currentLocal ? cleanTrackName(currentLocal.name) : 'Sin canción'}
+            </p>
+            <p className="text-sm text-slate-500">
+              {source === 'youtube'
+                ? `${ytQueueIndex + 1} de ${ytQueue.length} · ${ytStatusText()}`
+                : `${localIndex + 1} de ${localTracks.length} · ${localPlaying ? 'Sonando…' : 'En pausa'}`}
+            </p>
+          </div>
+
+          {/* Barra grande + controles grandes. */}
+          <div className="mt-4">
+            <SeekBar large current={ytTime.current} total={bigSeekTotal} onSeek={seekYt} />
+            <div className="mt-3 flex items-center justify-center gap-6">
+              <button
+                onClick={() => {
+                  if (source === 'local') { if (localTracks.length > 1) playLocal((localIndex - 1 + localTracks.length) % localTracks.length) }
+                  else if (ytQueue.length > 1) playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)
+                }}
+                disabled={source === 'local' ? localTracks.length < 2 : ytQueue.length < 2}
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 text-2xl disabled:opacity-30"
+                aria-label="Canción anterior"
+              >
+                ⏮
+              </button>
+              <button
+                onClick={togglePlay}
+                className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-pulso text-3xl font-black text-night"
+                aria-label={anyPlaying ? 'Pausar música' : 'Reproducir música'}
+              >
+                {anyPlaying ? '⏸' : '▶'}
+              </button>
+              <button
+                onClick={() => {
+                  if (source === 'local') { if (localTracks.length > 1) playLocal((localIndex + 1) % localTracks.length) }
+                  else if (ytQueue.length > 1) playYtTrack((ytQueueIndex + 1) % ytQueue.length)
+                }}
+                disabled={source === 'local' ? localTracks.length < 2 : ytQueue.length < 2}
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 text-2xl disabled:opacity-30"
+                aria-label="Siguiente canción"
+              >
+                ⏭
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex gap-2">
             <button
               onClick={() => switchSource('youtube')}
               className={`flex-1 rounded-full px-3 py-2 text-sm font-semibold ${source === 'youtube' ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}
@@ -1007,6 +1349,9 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               📱 Música local
             </button>
           </div>
+          <p className="mt-2 text-center text-xs text-slate-400">Sigue sonando con la pantalla apagada y al salir de la app.</p>
+
+          <div className="mt-3 space-y-3">
 
           {source === 'youtube' ? (
             <>
@@ -1015,62 +1360,57 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                   📶 Sin internet: YouTube no suena. Cambia a 📱 Música local, que sí funciona sin datos.
                 </p>
               )}
-              <>
-                {ytExtractErr && (
-                  <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">
-                    {ytExtractErr}{' '}
-                    <button className="font-bold underline" onClick={retryExtractor}>Probar de nuevo</button>
-                  </p>
-                )}
-                <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
-                  Suena por el extractor: audio directo en segundo plano, con la pantalla apagada. Tu lista se guarda en este teléfono.
-                </p>
-                  {ytResolving && <p className="rounded-xl bg-sage-100 p-2 text-sm text-slate-600">Resolviendo audio…</p>}
-                  {ytCurrent && (
-                    <div className="space-y-2 rounded-xl bg-sage-100 p-3">
-                      <div className="flex items-center gap-3">
-                        <TrackThumb track={ytCurrent} className="h-14 w-14" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-bold">{ytCurrent.title}</p>
-                          <p className="text-xs text-slate-500">
-                            {ytQueueIndex + 1} de {ytQueue.length} · {playing ? 'Sonando…' : 'En pausa'}{ytResolving ? ' · Resolviendo audio…' : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <SeekBar current={ytTime.current} total={ytTime.duration || ytCurrent.durationSec || 0} onSeek={seekYt} />
-                      <div className="flex gap-2">
-                        <Btn variant="ghost" className="flex-1" onClick={() => playYtTrack((ytQueueIndex - 1 + ytQueue.length) % ytQueue.length)} disabled={ytQueue.length < 2}>⏮ Anterior</Btn>
-                        <Btn variant={playing ? 'ghost' : 'coral'} className="flex-1" onClick={() => setPlaying(!playing)}>
-                          {playing ? '⏸ Pausa' : '▶ Reproducir'}
-                        </Btn>
-                        <Btn variant="ghost" className="flex-1" onClick={() => playYtTrack((ytQueueIndex + 1) % ytQueue.length)} disabled={ytQueue.length < 2}>Siguiente ⏭</Btn>
-                      </div>
-                    </div>
-                  )}
-
-                  {ytQueueList}
-
-                  {presetButtons}
-                  <div className="flex items-center gap-2">
-                    <Btn variant="teal" className="flex-1" onClick={() => void openExternalUrl(ytCurrent ? `https://www.youtube.com/watch?v=${ytCurrent.id}` : externalUrl(preset, custom))}>
-                      ▶ Abrir en YouTube
-                    </Btn>
+              {ytDiag && (
+                <div className="space-y-2 rounded-xl bg-amber-50 p-3">
+                  <p className="text-sm font-bold text-amber-900">No suena: {YT_DIAG_TEXT[ytDiag.kind]}</p>
+                  <div className="space-y-0.5 text-xs text-amber-800">
+                    <p>Internet: {navigator.onLine ? '✓ Conectado' : '✗ Sin conexión'}</p>
+                    <p>Servidor PULSO: {diagServerOk === null ? 'Revisando…' : diagServerOk ? '✓ Funciona' : '✗ No responde'}</p>
+                    <p>YouTube: {ytDiag.kind === 'blocked' ? '✗ Bloqueado por ahora' : ytDiag.kind === 'key' ? '✗ Clave inválida' : ytDiag.kind === 'offline' ? '✗ Sin internet' : 'Revisando…'}</p>
                   </div>
-                  {customField}
-                  {useCustom && (
-                    <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
-                      Tu playlist guardada: {pref.customLabel || 'Mi playlist de YouTube'}. El botón de arriba abre esa lista en YouTube.
-                    </p>
+                  {diagRetrying && <p className="text-xs font-semibold text-amber-800">Reintentando solo…</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <Btn variant="teal" onClick={retryExtractor}>Probar de nuevo</Btn>
+                    {ytQueue.length > 1 && <Btn variant="ghost" onClick={() => playYtTrack((ytQueueIndex + 1) % ytQueue.length)}>Siguiente canción</Btn>}
+                    <Btn variant="ghost" onClick={() => setShowReport((s) => !s)}>Reportar a soporte</Btn>
+                  </div>
+                  {showReport && (
+                    <>
+                      <p className="whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-700">{supportReportText()}</p>
+                      <div className="flex items-center gap-2">
+                        <Btn variant="teal" onClick={() => void shareSupportReport()}>Compartir reporte</Btn>
+                        {reportCopied && <span className="text-xs font-semibold text-teal-dark">Copiado</span>}
+                      </div>
+                    </>
                   )}
-                </>
-              </>
+                </div>
+              )}
+              {diagAllFailed && (
+                <div className="space-y-2 rounded-xl bg-amber-50 p-3">
+                  <p className="text-sm font-bold text-amber-900">YouTube no responde ahorita.</p>
+                  <p className="text-xs text-amber-800">Tu música local suena sin internet ni extractor.</p>
+                  <Btn variant="teal" onClick={() => switchSource('local')}>📱 Escuchar música local</Btn>
+                </div>
+              )}
+              {ytResolving && <p className="text-center text-xs text-slate-500">Resolviendo audio…</p>}
+              {ytQueueList}
+              {presetButtons}
+              <div className="flex items-center gap-2">
+                <Btn variant="teal" className="flex-1" onClick={() => void openExternalUrl(ytCurrent ? `https://www.youtube.com/watch?v=${ytCurrent.id}` : externalUrl(preset, custom))}>
+                  ▶ Abrir en YouTube
+                </Btn>
+              </div>
+              {customField}
+              {useCustom && (
+                <p className="rounded-xl bg-teal/10 p-2 text-sm text-teal-dark">
+                  Tu playlist guardada: {pref.customLabel || 'Mi playlist de YouTube'}. El botón de arriba abre esa lista en YouTube.
+                </p>
+              )}
+            </>
           ) : (
             <>
               {nativeMusic ? (
                 <>
-                  <p className="text-sm text-slate-600">
-                    Tus canciones del teléfono, sin elegirlas una por una. Se pide el permiso de Música y audio una sola vez; la lista queda guardada en este teléfono y los archivos no se copian ni se suben a ningún servidor.
-                  </p>
                   <Btn variant="teal" className="w-full" onClick={() => void loadDeviceSongs()} disabled={deviceLoading}>
                     {deviceLoading ? '🔍 Buscando…' : deviceLoaded ? '🔄 Actualizar mis canciones' : '🎵 Mis canciones del teléfono'}
                   </Btn>
@@ -1084,11 +1424,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                     />
                   )}
                 </>
-              ) : (
-                <p className="text-sm text-slate-600">
-                  Elige canciones que ya tengas en tu teléfono (MP3, M4A, WAV…). No se suben a ningún servidor, solo suenan aquí. Al cerrar la app hay que volver a elegirlas.
-                </p>
-              )}
+              ) : null}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1101,30 +1437,6 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
                 {nativeMusic ? '📂 …o elegir archivos a mano' : '📂 Elegir archivos de mi teléfono'}
               </Btn>
               {customErr && <p className="rounded-xl bg-red-50 p-2 text-sm text-red-700">{customErr}</p>}
-
-              {currentLocal && (
-                <div className="space-y-3 rounded-xl bg-sage-100 p-3">
-                  <p className="font-bold">🎵 {cleanTrackName(currentLocal.name)}</p>
-                  <p className="text-xs text-slate-500">
-                    {localIndex + 1} de {localTracks.length} · {localPlaying ? 'Sonando…' : 'En pausa'}
-                  </p>
-                  {useNativePlayer && currentLocal?.nativeUri && (
-                    <SeekBar current={ytTime.current} total={ytTime.duration || (currentLocal.durationMs ? currentLocal.durationMs / 1000 : 0)} onSeek={seekYt} />
-                  )}
-                  <div className="flex gap-2">
-                    <Btn variant="ghost" className="flex-1" onClick={() => playLocal((localIndex - 1 + localTracks.length) % localTracks.length)} disabled={localTracks.length < 2}>⏮ Anterior</Btn>
-                    <Btn variant={localPlaying ? 'ghost' : 'coral'} className="flex-1" onClick={() => setLocalPlaying(!localPlaying)}>
-                      {localPlaying ? '⏸ Pausa' : '▶ Reproducir'}
-                    </Btn>
-                    <Btn variant="ghost" className="flex-1" onClick={() => playLocal((localIndex + 1) % localTracks.length)} disabled={localTracks.length < 2}>Siguiente ⏭</Btn>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    Se controla también desde la pantalla de bloqueo / notificaciones. {nativeMusic
-                      ? 'Con la pantalla apagada sigue sonando: mientras suena, la app mantiene un servicio en primer plano (verás la notificación "PULSO · Sonando").'
-                      : 'Aguanta mejor en segundo plano que YouTube, pero si bloqueas la pantalla mucho tiempo el navegador puede pausarla: mantén la pantalla encendida con el interruptor de abajo.'}
-                  </p>
-                </div>
-              )}
 
               {localTracks.length > 0 && (
                 <div className="space-y-1">
@@ -1202,7 +1514,11 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
         onPlay={() => {
           audioResumeTriesRef.current = 0
           if (sourceRef.current === 'local') setLocalPlaying(true)
-          else if (sourceRef.current === 'youtube') setPlaying(true)
+          else if (sourceRef.current === 'youtube') {
+            setPlaying(true)
+            if (!ytAudibleRef.current) { ytAudibleRef.current = true; setYtAudible(true) }
+            if (ytStalledRef.current) { ytStalledRef.current = false; setYtStalled(false) }
+          }
         }}
         onPause={() => {
           const audio = audioRef.current
@@ -1215,7 +1531,7 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
               const a = audioRef.current
               if (a && a.ended && a.paused) {
                 if (sourceRef.current === 'local') setLocalPlaying(false)
-                else if (sourceRef.current === 'youtube') setPlaying(false)
+                else if (sourceRef.current === 'youtube') { setPlaying(false); setYtAudible(false); ytAudibleRef.current = false }
               }
             }, 150)
             return
@@ -1234,10 +1550,11 @@ export default function MusicPlayer({ profileId, compact, expanded, onExpandedCh
             if (playingRef.current && audioResumeTriesRef.current < 3) {
               audioResumeTriesRef.current += 1
               window.setTimeout(() => { void audioRef.current?.play().catch(() => setPlaying(false)) }, 400)
-            } else setPlaying(false)
+            } else { setPlaying(false); setYtAudible(false); ytAudibleRef.current = false }
           }
         }}
         onEnded={() => {
+          if (sourceRef.current === 'youtube') { setYtAudible(false); ytAudibleRef.current = false }
           if (ytExtractorActive && ytQueue.length > 1) {
             setYtQueueIndex((i) => (i + 1) % ytQueue.length)
             setYtAudioUrl(null)
