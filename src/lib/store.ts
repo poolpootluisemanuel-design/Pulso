@@ -85,7 +85,7 @@ function cacheGet<T>(key: string, fallback: T): T {
 }
 
 export interface OutboxOp {
-  kind: 'workout' | 'session' | 'post' | 'rsvp' | 'profile' | 'plan' | 'delete-workout'
+  kind: 'workout' | 'session' | 'post' | 'rsvp' | 'rsvp-cancel' | 'profile' | 'plan' | 'delete-workout'
   item?: unknown
   id?: string
   /** Intentos fallidos que NO fueron de red (ej. la base rechazó la
@@ -137,6 +137,29 @@ function queueOffline(op: OutboxOp): void {
   saveOutbox(filtered)
 }
 
+/** Promueve al primero en lista de espera de una sesión a
+ *  confirmado. Devuelve true si no había nadie en espera o si la
+ *  promoción funcionó; false si la lectura o el update fallaron.
+ *  La usan cancelRsvp (I2) y la rama 'rsvp-cancel' de syncOutbox
+ *  (I3). Antes ese fallo era silencioso: ahora quien llama decide
+ *  qué hacer (reintento, aviso, anotar en fallidos). */
+async function promoteFirstWaitlisted(sessionId: string): Promise<boolean> {
+  if (!supabase) return false
+  try {
+    const { data, error } = await withTimeout(
+      supabase.from('rsvps').select('*').eq('session_id', sessionId).eq('status', 'waitlist').order('created_at').limit(1)
+    )
+    if (error) return false
+    if (!data || data.length === 0) return true
+    const { error: uErr } = await withTimeout(
+      supabase.from('rsvps').update({ status: 'confirmed' }).eq('id', data[0].id)
+    )
+    return !uErr
+  } catch {
+    return false
+  }
+}
+
 // Sube a Supabase lo que se hizo sin internet. Se llama al volver la
 // red y después de cada carga exitosa. Devuelve cuántos quedaron por subir.
 export async function syncOutbox(): Promise<number> {
@@ -172,8 +195,45 @@ export async function syncOutbox(): Promise<number> {
         const { error } = await supabase.from('posts').upsert(op.item as Post, { onConflict: 'id' })
         if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
       } else if (op.kind === 'rsvp' && op.item) {
-        const { error } = await supabase.from('rsvps').upsert(op.item as Rsvp, { onConflict: 'id' })
-        if (error && !/duplicate|unique|conflict/i.test(error.message)) throw error
+        const rsvp = op.item as Rsvp
+        // I3: la RPC decide el estado real (confirmado o espera)
+        // según el cupo en la base — antes se subía tal cual el
+        // 'waitlist' guardado sin internet y quedaba congelado en
+        // espera para siempre, aunque hubiera lugares libres. La
+        // RPC es idempotente: si ya estás apuntado, devuelve tu
+        // estado sin duplicar.
+        const { error } = await supabase.rpc('join_session', { p_session_id: rsvp.session_id, p_profile_id: rsvp.profile_id })
+        if (error) {
+          if (/function|does not exist|pgrst|not found|schema cache/i.test(error.message.toLowerCase())) {
+            // La migración aún no está en esta base: se sube como antes.
+            const { error: uErr } = await supabase.from('rsvps').upsert(rsvp, { onConflict: 'id' })
+            if (uErr && !/duplicate|unique|conflict/i.test(uErr.message)) throw uErr
+          } else if (!/duplicate|unique|conflict/i.test(error.message)) {
+            throw error
+          }
+        }
+      } else if (op.kind === 'rsvp-cancel' && op.item) {
+        // I3: cancelación hecha sin internet — se procesa al volver
+        // la red: borrar + promover al primero en espera (lógica de I2).
+        const c = op.item as { session_id: string; profile_id: string }
+        const { error } = await supabase.from('rsvps').delete().eq('session_id', c.session_id).eq('profile_id', c.profile_id)
+        if (error) throw error
+        let promoted = await promoteFirstWaitlisted(c.session_id)
+        if (!promoted) {
+          await new Promise((r) => setTimeout(r, 800))
+          promoted = await promoteFirstWaitlisted(c.session_id)
+        }
+        if (!promoted) {
+          // La cancelación sí se hizo; lo que falló fue promover al
+          // primero en espera. Queda anotado en Perfil en vez de
+          // reintentar la operación entera para siempre.
+          addFailedOp({
+            kind: 'rsvp',
+            id: c.session_id,
+            error: 'No se pudo promover al primero en lista de espera tras cancelar (sincronización sin internet).',
+            failedAt: new Date().toISOString(),
+          })
+        }
       } else if (op.kind === 'profile' && op.item) {
         const p = op.item as Profile
         const { error } = await supabase.from('profiles').upsert({
@@ -765,7 +825,7 @@ export async function listRsvps(sessionId: string): Promise<Rsvp[]> {
   return load<Rsvp[]>('rsvps', []).filter((r) => r.session_id === sessionId)
 }
 
-export async function joinSession(session: SessionItem, profileId: string): Promise<'confirmed' | 'waitlist'> {
+export async function joinSession(session: SessionItem, profileId: string): Promise<'confirmed' | 'waitlist' | 'queued'> {
   await assertNotBlocked(profileId)
   if (supabaseConfigured && supabase) {
     // RPC join_session (migration_join_session_rpc.sql): cuenta y
@@ -786,9 +846,13 @@ export async function joinSession(session: SessionItem, profileId: string): Prom
       if (!/function|does not exist|pgrst|not found|schema cache/i.test(msg) && !isNetworkError(e)) throw e instanceof Error ? e : new Error(msg)
       if (isNetworkError(e)) {
         // Sin internet: se apunta en el teléfono y se sube luego.
+        // Se guarda con estado 'waitlist', pero al sincronizar la
+        // RPC decide el estado real según el cupo (I3), así que no
+        // queda congelado en espera. Se devuelve 'queued' para que
+        // la app no diga "Cupo lleno" cuando solo falta internet.
         const rsvp: Rsvp = { id: uid(), session_id: session.id, profile_id: profileId, status: 'waitlist' }
         queueOffline({ kind: 'rsvp', item: rsvp })
-        return 'waitlist'
+        return 'queued'
       }
       console.warn('RPC join_session no disponible (falta correr migration_join_session_rpc.sql); usando conteo local:', msg)
     }
@@ -806,6 +870,7 @@ export async function joinSession(session: SessionItem, profileId: string): Prom
       if (!isNetworkError(e)) throw e
       // Sin internet: se apunta en el teléfono y se sube al volver la red.
       queueOffline({ kind: 'rsvp', item: rsvp })
+      return 'queued'
     }
     return status
   }
@@ -815,20 +880,48 @@ export async function joinSession(session: SessionItem, profileId: string): Prom
   return status
 }
 
-export async function cancelRsvp(sessionId: string, profileId: string): Promise<void> {
+export async function cancelRsvp(sessionId: string, profileId: string): Promise<'cancelled' | 'queued'> {
   if (supabaseConfigured && supabase) {
-    const { error } = await withTimeout(supabase.from('rsvps').delete().eq('session_id', sessionId).eq('profile_id', profileId))
-    if (error) throw new Error(error.message)
-    // Promover al primero en lista de espera.
-    const { data } = await supabase.from('rsvps').select('*').eq('session_id', sessionId).eq('status', 'waitlist').order('created_at').limit(1)
-    if (data && data[0]) await supabase.from('rsvps').update({ status: 'confirmed' }).eq('id', data[0].id)
-    return
+    try {
+      const { error } = await withTimeout(supabase.from('rsvps').delete().eq('session_id', sessionId).eq('profile_id', profileId))
+      if (error) throw new Error(error.message)
+    } catch (e) {
+      if (isNetworkError(e)) {
+        // I3: sin internet la cancelación se encola y se procesa
+        // al volver la red (rama 'rsvp-cancel' de syncOutbox:
+        // borrar + promover). El id fija la operación para no
+        // duplicarla si se cancela dos veces sin internet.
+        queueOffline({ kind: 'rsvp-cancel', id: `rsvp-cancel-${sessionId}-${profileId}`, item: { session_id: sessionId, profile_id: profileId } })
+        return 'queued'
+      }
+      throw e
+    }
+    // Promover al primero en lista de espera (I2): con un reintento
+    // tras una pausa corta. Si sigue fallando, se avisa al usuario
+    // y queda anotado en Perfil (listFailedOps) en vez de fallar
+    // en silencio. El lugar sí se canceló.
+    let promoted = await promoteFirstWaitlisted(sessionId)
+    if (!promoted) {
+      await new Promise((r) => setTimeout(r, 800))
+      promoted = await promoteFirstWaitlisted(sessionId)
+    }
+    if (!promoted) {
+      addFailedOp({
+        kind: 'rsvp',
+        id: sessionId,
+        error: 'No se pudo promover al primero en lista de espera tras cancelar.',
+        failedAt: new Date().toISOString(),
+      })
+      throw new Error('Tu lugar se canceló, pero no se pudo confirmar al primero en espera. Quedó anotado en Perfil para revisarlo.')
+    }
+    return 'cancelled'
   }
   const all = load<Rsvp[]>('rsvps', [])
   const rest = all.filter((r) => !(r.session_id === sessionId && r.profile_id === profileId))
   const firstWait = rest.find((r) => r.session_id === sessionId && r.status === 'waitlist')
   if (firstWait) firstWait.status = 'confirmed'
   save('rsvps', rest)
+  return 'cancelled'
 }
 
 // ---------- Entrenamientos ----------

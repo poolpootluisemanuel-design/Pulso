@@ -388,7 +388,13 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
                       setErr('')
                       try {
                         const st = await joinSession(s, profile.id)
-                        setMsg(st === 'confirmed' ? '¡Confirmado! Te esperamos.' : 'Cupo lleno, quedaste en lista de espera. Revisa la app: si se libera un lugar, aparecerás como confirmado.')
+                        setMsg(
+                          st === 'confirmed'
+                            ? '¡Confirmado! Te esperamos.'
+                            : st === 'queued'
+                              ? 'Sin internet: tu lugar se confirmará al recuperar señal.'
+                              : 'Cupo lleno, quedaste en lista de espera. Revisa la app: si se libera un lugar, aparecerás como confirmado.'
+                        )
                         await loadRsvps(s.id)
                       } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No te pudiste apuntar.') }
                     }}>Me apunto</Btn>
@@ -405,8 +411,8 @@ export default function SessionsTab({ profile, sessions, onRefresh, createSignal
                         setErr('')
                         setConfirmCancelId(null)
                         try {
-                          await cancelRsvp(s.id, profile.id)
-                          setMsg('Cancelaste tu lugar en esta sesión.')
+                          const res = await cancelRsvp(s.id, profile.id)
+                          setMsg(res === 'queued' ? 'Se cancelará cuando vuelva internet.' : 'Cancelaste tu lugar en esta sesión.')
                           await loadRsvps(s.id)
                         } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'No se pudo cancelar. Revisa tu internet e inténtalo de nuevo.') }
                       }}>
