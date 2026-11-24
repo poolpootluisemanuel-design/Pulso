@@ -60,6 +60,19 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
   if (savedRef.current === null) savedRef.current = loadSavedGps()
   const saved = savedRef.current
   const [sport, setSport] = useState(saved?.sport || 'Caminata')
+  // Espejo del deporte en un ref: el watcher GPS (nativo o web) se
+  // registra una vez al iniciar y su callback cierra sobre el
+  // handleFix de ese render; si el deporte cambiara solo en el
+  // estado, el watcher seguiría usando el tope viejo. Leyendo el
+  // ref, el tope de velocidad cambia en el siguiente fix sin
+  // reiniciar el watch, el cronómetro ni la ruta.
+  const sportRef = useRef(saved?.sport || 'Caminata')
+  useEffect(() => { sportRef.current = sport }, [sport])
+  // Aviso en vivo por velocidad: el filtro de velocidad descarta en
+  // silencio (por diseño), así que la racha de descartes seguidos
+  // solo sirve para avisar en pantalla, no para cambiar el filtro.
+  const [speedWarning, setSpeedWarning] = useState(false)
+  const speedDiscardsRef = useRef(0)
   // Una grabación guardada se restaura en pausa: no se reanuda sola sin
   // que el usuario toque Reanudar (el navegador no daría GPS sin gesto).
   const [status, setStatus] = useState<'idle' | 'recording' | 'paused' | 'done'>(saved ? 'paused' : 'idle')
@@ -411,6 +424,9 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
       // inventaría); la ruta dibuja un tramo recto honesto hasta
       // la posición actual y el tiempo/distancia acumulados se
       // conservan.
+      // Un descarte por salto no es un descarte por velocidad: corta
+      // la racha del aviso en vivo.
+      speedDiscardsRef.current = 0
       jumpDiscardsRef.current += 1
       const gapSec = (now - anchorAtRef.current) / 1000
       const n = jumpDiscardsRef.current
@@ -429,9 +445,19 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     }
     // Velocidad implícita: un salto de 10 m en 1 s son 36 km/h, imposible
     // caminando. La deriva salta así; el movimiento real no.
+    // El tope se lee del ref, no del estado: el watcher se registró al
+    // iniciar y su handleFix es de ese render; con el ref, cambiar de
+    // deporte en plena grabación cambia el tope en el siguiente fix.
     const speedMs = (d * 1000) / dtSec
-    const maxSpeedMs = sport === 'Ciclismo' ? 15 : sport === 'Correr' ? 6 : 2.5
-    if (speedMs > maxSpeedMs) return
+    const maxSpeedMs = sportRef.current === 'Ciclismo' ? 15 : sportRef.current === 'Correr' ? 6 : 2.5
+    if (speedMs > maxSpeedMs) {
+      // Descarte por velocidad, silencioso por diseño... pero se
+      // cuenta la racha para avisar en vivo: sin aviso, ir más rápido
+      // que el deporte elegido se ve igual que "no marca nada".
+      speedDiscardsRef.current += 1
+      if (speedDiscardsRef.current >= 3) setSpeedWarning(true)
+      return
+    }
     // Ventana de 30 s: si en 30 s no se acumuló movimiento real
     // (menos de 10 m), estás parado: entra la pausa automática y los
     // saltos de deriva ya no se suman. El cronómetro sigue corriendo.
@@ -460,10 +486,14 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     }
     // El ancla se mueve SOLO al aceptar el punto: aquí también se
     // actualiza el tiempo del ancla (la velocidad se mide desde aquí).
-    // Un punto aceptado corta la racha de descartes por salto (B1).
+    // Un punto aceptado corta la racha de descartes por salto (B1) y
+    // también la racha de descartes por velocidad (el aviso se quita:
+    // ya vuelve a marcar).
     lastPoint.current = next
     anchorAtRef.current = now
     jumpDiscardsRef.current = 0
+    speedDiscardsRef.current = 0
+    setSpeedWarning(false)
     stillWindowDistKm.current += d
     setCurrentPos(next)
     setDistanceKm((km) => km + d)
@@ -474,6 +504,8 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     lastPoint.current = from
     anchorAtRef.current = Date.now()
     jumpDiscardsRef.current = 0
+    speedDiscardsRef.current = 0
+    setSpeedWarning(false)
     stillWindowStart.current = Date.now()
     stillWindowDistKm.current = 0
     setAutoPausedBoth(false)
@@ -602,9 +634,30 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     setStatus('done')
   }
 
+  // Cambiar de deporte EN MEDIO de la grabación: solo cambia el tope
+  // de velocidad para los siguientes fixes (el watcher en marcha lo
+  // lee vía sportRef). No se reinicia el watch, el cronómetro, la
+  // distancia, la ruta ni el ancla: todo lo acumulado se conserva.
+  // El aviso de velocidad se quita: con el deporte nuevo, la racha
+  // de descartes empieza de cero.
+  function changeSport(s: string) {
+    if (s === sport) return
+    setSport(s)
+    speedDiscardsRef.current = 0
+    setSpeedWarning(false)
+  }
+
   const minutes = seconds / 60
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
   const ss = String(seconds % 60).padStart(2, '0')
+  // Ritmo y velocidad para las celdas: el valor va grande y la unidad
+  // chica al lado (antes paceMinKm devolvía "25:42 min/km" todo en
+  // text-xl y la unidad se partía a otra línea pareciendo otro número).
+  // paceMinKm no se toca: en texto corrido (resumen, historial) la
+  // unidad dentro de la frase se lee bien.
+  const paceStr = paceMinKm(distanceKm, minutes)
+  const paceValue = paceStr === '—' ? '—' : paceStr.replace(' min/km', '')
+  const speedValue = distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'
 
   // Mapa real de la ruta (MapLibre oscuro, 3D): la ruta se dibuja en
   // vivo en rojo pulso, el mapa sigue tu posición. Sin internet no
@@ -670,13 +723,19 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
             </div>
           )}
           <div className="flex gap-2">
-            {['Caminata', 'Correr', 'Ciclismo'].map((s) => (
+            {([
+              ['Caminata', 'hasta 9 km/h'],
+              ['Correr', 'hasta 20 km/h'],
+              ['Ciclismo', 'hasta 50 km/h'],
+            ] as const).map(([s, limit]) => (
               <button key={s} onClick={() => setSport(s)}
-                className={`rounded-full px-3 py-2 text-sm font-semibold ${sport === s ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}>
-                {s}
+                className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold ${sport === s ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}>
+                <span className="block">{s}</span>
+                <span className={`block text-[11px] font-normal ${sport === s ? 'text-white/80' : 'text-slate-500'}`}>{limit}</span>
               </button>
             ))}
           </div>
+          <p className="text-xs text-slate-500">Si vas más rápido que tu deporte, la distancia no se suma.</p>
           {sport !== 'Ciclismo' && (
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={stepsOn} onChange={(e) => setStepsOn(e.target.checked)} />
@@ -749,9 +808,9 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
             </div>
           )}
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black tabular-nums">{distanceKm.toFixed(2)} km</p><p className="text-xs text-slate-500">Distancia</p></div>
-            <div className="rounded-xl bg-sage-50 p-2"><p className="text-xl font-black">{sport === 'Ciclismo' ? `${distanceKm > 0 && minutes > 0 ? (distanceKm / (minutes / 60)).toFixed(1) : '0'} km/h` : distanceKm < 0.01 ? '—' : paceMinKm(distanceKm, minutes)}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="whitespace-nowrap text-xl font-black tabular-nums">{mm}:{ss}</p><p className="text-xs text-slate-500">Tiempo</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="whitespace-nowrap text-xl font-black tabular-nums">{distanceKm.toFixed(2)} <span className="text-xs font-bold text-slate-500">km</span></p><p className="text-xs text-slate-500">Distancia</p></div>
+            <div className="rounded-xl bg-sage-50 p-2"><p className="whitespace-nowrap text-xl font-black">{sport === 'Ciclismo' ? <>{speedValue} <span className="text-xs font-bold text-slate-500">km/h</span></> : paceValue === '—' ? '—' : <>{paceValue} <span className="text-xs font-bold text-slate-500">min/km</span></>}</p><p className="text-xs text-slate-500">{sport === 'Ciclismo' ? 'Velocidad' : 'Ritmo'}</p></div>
           </div>
           {sport !== 'Ciclismo' && (
             <div className="rounded-xl bg-sage-50 p-2 text-center">
@@ -766,10 +825,33 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
               </p>
             </div>
           )}
+          {/* Cambiar de deporte sin detener: el tope de velocidad cambia
+              en el siguiente fix; el tiempo, la distancia y la ruta se
+              conservan (ver changeSport). */}
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-xs font-bold text-slate-500">Deporte:</span>
+            <div className="flex flex-1 gap-1.5">
+              {(['Caminata', 'Correr', 'Ciclismo'] as const).map((s) => (
+                <button key={s} onClick={() => changeSport(s)}
+                  className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${sport === s ? 'bg-teal text-white' : 'bg-sage-100 text-teal-dark'}`}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
           {routeMap}
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : isNative() ? '● Grabando… puedes apagar la pantalla, el GPS sigue' : '● Grabando… no cierres la app'}</p>
           {autoPaused && status === 'recording' && (
             <p className="rounded-xl bg-amber-50 p-2 text-center text-sm text-amber-800">⏸ Parece que estás parado — GPS en pausa automática. La distancia no se suma hasta que te muevas de verdad. El tiempo sigue corriendo.</p>
+          )}
+          {speedWarning && status === 'recording' && (
+            <p className="rounded-xl border-l-4 border-amber-500 bg-amber-100 p-2 text-center text-sm font-semibold text-amber-900">
+              {sport === 'Ciclismo'
+                ? 'Vas a más de 50 km/h — baja la velocidad para que la distancia se sume.'
+                : sport === 'Correr'
+                  ? 'Vas demasiado rápido para Correr — cambia a Ciclismo.'
+                  : 'Vas demasiado rápido para Caminata — cambia a Correr o Ciclismo.'}
+            </p>
           )}
           <p className="text-center text-xs text-slate-500">{isNative() ? 'En la app instalada el GPS sigue grabando con la pantalla apagada (servicio en primer plano). Con el móvil apagado sí se pausa todo.' : 'La pantalla se mantiene encendida mientras grabas, para que el GPS y la música no se pausen.'}</p>
           {error && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-800">{error}</p>}
