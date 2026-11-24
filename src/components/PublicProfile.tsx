@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import type { Post, Profile } from '../lib/types'
+import type { Post, Profile, Workout } from '../lib/types'
+import { parseRoutePost } from '../lib/routeShare'
 import { Btn, Card, Empty, Tag } from './ui'
+import WorkoutPostCard from './WorkoutPostCard'
 
 /** Perfil público de un usuario, tal como lo ven los demás.
  *  Solo muestra datos públicos (foto, nombre, zona, bio, deportes con
@@ -9,9 +11,12 @@ import { Btn, Card, Empty, Tag } from './ui'
  *  vista `profiles_public`, sin correo. Se usa igual para ver el
  *  perfil de otra persona desde Comunidad y Buscar, y para la vista
  *  previa "Ver como me ven" del propio perfil. */
-export default function PublicProfile({ profile, posts, title, onClose }: {
+export default function PublicProfile({ profile, posts, workouts, title, onClose }: {
   profile: Profile
   posts: Post[]
+  /** Entrenamientos propios (si es el perfil propio): para dibujar la
+      ruta completa en vez de la polilínea reducida del post. */
+  workouts?: Workout[]
   title?: string
   onClose: () => void
 }) {
@@ -64,12 +69,26 @@ export default function PublicProfile({ profile, posts, title, onClose }: {
           <Empty text={`${profile.name} aún no ha publicado nada en Comunidad.`} />
         ) : (
           <div className="space-y-2">
-            {posts.map((p) => (
-              <Card key={p.id}>
-                <p className="text-sm text-slate-600">{new Date(p.created_at).toLocaleString('es-MX')}</p>
-                <p className="mt-1">{p.text}</p>
-              </Card>
-            ))}
+            {posts.map((p) => {
+              const route = parseRoutePost(p.text)
+              return (
+                <Card key={p.id}>
+                  <p className="text-sm text-slate-600">{new Date(p.created_at).toLocaleString('es-MX')}</p>
+                  {route ? (
+                    <WorkoutPostCard
+                      sport={route.sport}
+                      distanceKm={route.distanceKm}
+                      durationMin={route.durationMin}
+                      steps={route.steps}
+                      route={workouts?.find((w) => w.id === route.workoutId)?.route ?? route.route}
+                      note={route.note || undefined}
+                    />
+                  ) : (
+                    <p className="mt-1">{p.text}</p>
+                  )}
+                </Card>
+              )
+            })}
           </div>
         )}
       </div>

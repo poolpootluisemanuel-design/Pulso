@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import type { Business, Post, Profile } from '../lib/types'
+import type { Business, Post, Profile, Workout } from '../lib/types'
 import { createPost, getProfile } from '../lib/store'
+import { parseRoutePost } from '../lib/routeShare'
 import { Btn, Card, Empty, inputCls } from './ui'
 import PublicProfile from './PublicProfile'
+import WorkoutPostCard from './WorkoutPostCard'
 
 // Grupos por deporte (chips arriba del feed): filtran las
 // publicaciones que mencionan ese deporte. Las publicaciones no
@@ -19,7 +21,7 @@ const GROUP_SPORTS: { label: string; words: string[] }[] = [
   { label: 'Gym', words: ['gym', 'gimnasio'] },
 ]
 
-export default function Community({ profile, posts, businesses, onRefresh, guest = false, onNeedAccount }: { profile: Profile; posts: Post[]; businesses: Business[]; onRefresh: () => void; guest?: boolean; onNeedAccount?: () => void }) {
+export default function Community({ profile, posts, workouts, businesses, onRefresh, guest = false, onNeedAccount }: { profile: Profile; posts: Post[]; workouts: Workout[]; businesses: Business[]; onRefresh: () => void; guest?: boolean; onNeedAccount?: () => void }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState('')
   // Grupo seleccionado: 'Todos' o un deporte. Filtra el feed por
@@ -96,26 +98,47 @@ export default function Community({ profile, posts, businesses, onRefresh, guest
 
       {visiblePosts.length === 0 ? <Empty text={group === 'Todos' ? 'Aún no hay publicaciones. Sé el primero en saludar.' : `Aún no hay publicaciones en ${group}. Sé el primero en publicar de este deporte.`} /> : (
         <div className="space-y-2">
-          {visiblePosts.map((p) => (
-            <Card key={p.id}>
-              <button
-                type="button"
-                className="flex items-center gap-2 text-left"
-                onClick={() => openAuthor(p)}
-                title="Ver perfil de esta persona"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-coral text-base font-black text-night">
-                  {p.author_name.slice(0, 1).toUpperCase()}
-                </span>
-                <span>
-                  <span className="font-bold underline decoration-teal/50 underline-offset-2">{p.author_name}</span>
-                  {p.profile_id === profile.id && <span className="ml-1 text-xs font-semibold text-teal-dark">(tú)</span>}
-                  <span className="block text-sm text-slate-600">{new Date(p.created_at).toLocaleString('es-MX')}</span>
-                </span>
-              </button>
-              <p className="mt-1">{p.text}</p>
-            </Card>
-          ))}
+          {visiblePosts.map((p) => {
+            // Publicación de recorrido: la primera línea del texto es un
+            // marcador con la ruta codificada (ver routeShare.ts); la UI
+            // lo oculta y dibuja la tarjeta con mapa + números + nota.
+            // Un post normal se ve como siempre.
+            const route = parseRoutePost(p.text)
+            return (
+              <Card key={p.id}>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 text-left"
+                  onClick={() => openAuthor(p)}
+                  title="Ver perfil de esta persona"
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-coral text-base font-black text-night">
+                    {p.author_name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span>
+                    <span className="font-bold underline decoration-teal/50 underline-offset-2">{p.author_name}</span>
+                    {p.profile_id === profile.id && <span className="ml-1 text-xs font-semibold text-teal-dark">(tú)</span>}
+                    <span className="block text-sm text-slate-600">{new Date(p.created_at).toLocaleString('es-MX')}</span>
+                  </span>
+                </button>
+                {route ? (
+                  <WorkoutPostCard
+                    sport={route.sport}
+                    distanceKm={route.distanceKm}
+                    durationMin={route.durationMin}
+                    steps={route.steps}
+                    // La ruta completa propia si está en este teléfono; si
+                    // no, la polilínea reducida que trae el propio post
+                    // (RLS no deja leer el entrenamiento de otro usuario).
+                    route={workouts.find((w) => w.id === route.workoutId)?.route ?? route.route}
+                    note={route.note || undefined}
+                  />
+                ) : (
+                  <p className="mt-1">{p.text}</p>
+                )}
+              </Card>
+            )
+          })}
         </div>
       )}
       {viewLoading && <p className="text-center text-sm text-slate-500">Abriendo perfil…</p>}
@@ -123,6 +146,7 @@ export default function Community({ profile, posts, businesses, onRefresh, guest
         <PublicProfile
           profile={viewProfile}
           posts={posts.filter((p) => p.profile_id === viewProfile.id)}
+          workouts={workouts}
           title={viewProfile.id === profile.id ? 'Tu perfil · así te ven los demás' : undefined}
           onClose={() => setViewProfile(null)}
         />

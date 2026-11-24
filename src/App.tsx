@@ -440,7 +440,7 @@ export default function App() {
               <button onClick={() => setComunidadView('buscar')} className={`pulso-press flex-1 rounded-full py-2 text-sm font-bold ${comunidadView === 'buscar' ? 'bg-night text-white shadow-md' : 'bg-white text-slate-600 shadow-sm'}`}>Buscar</button>
             </div>
             {comunidadView === 'sesiones' && <SessionsTab profile={profile} sessions={sessions} onRefresh={loadAll} createSignal={createSignal} guest={guest} onNeedAccount={() => setGuestGate(true)} gpsActive={activity.gps?.active === true} onMapImmersiveChange={setMapImmersive} />}
-            {comunidadView === 'feed' && <Community profile={profile} posts={posts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
+            {comunidadView === 'feed' && <Community profile={profile} posts={posts} workouts={workouts} businesses={businesses} onRefresh={loadAll} guest={guest} onNeedAccount={() => setGuestGate(true)} />}
             {comunidadView === 'buscar' && <Search profiles={profiles} meId={user?.id ?? ''} posts={posts} />}
           </div>
         )}
@@ -487,7 +487,7 @@ export default function App() {
           ) : null
         ) : (
           <div className={`pulso-tab-in ${tab === 'entrenar' ? '' : 'hidden'}`}>
-            <Train profile={profile} workouts={workouts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
+            <Train profile={profile} workouts={workouts} posts={posts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
           </div>
         )}
         {tab === 'perfil' && (

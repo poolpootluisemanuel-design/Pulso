@@ -3,6 +3,7 @@ import type { AuthUser, Post, Profile } from '../lib/types'
 import { DAYS, LEVELS, SPORTS, ZONES } from '../lib/types'
 import { changePassword, clearFailedOp, deletePost, listFailedOps, saveProfile, signOut, type FailedOp } from '../lib/store'
 import { detectZone } from '../lib/utils'
+import { postDisplayText } from '../lib/routeShare'
 import { isNative } from '../lib/native'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
 import PublicProfile from './PublicProfile'
@@ -144,7 +145,8 @@ export default function ProfileTab({ user, profile, posts, onRefresh, onSignOut,
             {myPosts.map((p) => (
               <li key={p.id} className="rounded-xl bg-sage-100 p-2">
                 <p className="text-xs text-slate-500">{new Date(p.created_at).toLocaleString('es-MX')}</p>
-                <p className="mt-0.5 text-sm">{p.text}</p>
+                {/* Un recorrido muestra su nota (o su resumen), nunca el marcador con la ruta codificada. */}
+                <p className="mt-0.5 text-sm">{postDisplayText(p.text)}</p>
                 <button
                   className="mt-1 text-xs font-bold text-red-600 underline"
                   onClick={() => {

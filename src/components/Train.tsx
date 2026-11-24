@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { Profile, Workout } from '../lib/types'
+import type { Post, Profile, Workout } from '../lib/types'
 import { SPORTS } from '../lib/types'
-import { deleteWorkout, logWorkout } from '../lib/store'
+import { createPost, deleteWorkout, logWorkout } from '../lib/store'
+import { buildRoutePostText, findRoutePost, parseRoutePost } from '../lib/routeShare'
 import { formatDate, paceMinKm, todayISO } from '../lib/utils'
 import GpsTracker, { GPS_SAVED_KEY } from './GpsTracker'
 import type { GpsProgress } from './GpsTracker'
@@ -10,28 +11,14 @@ import type { MusicStatus } from './MusicPlayer'
 import CoachPlan from './CoachPlan'
 import ImportWorkout from './ImportWorkout'
 import ImportWatch from './ImportWatch'
+import PublishWorkoutCard from './PublishWorkoutCard'
+import type { PublishVisibility } from './PublishWorkoutCard'
+import WorkoutPostCard from './WorkoutPostCard'
 import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
-
-function RouteMini({ route, h = 110 }: { route: { lat: number; lng: number }[]; h?: number }) {
-  if (!route || route.length < 2) return null
-  const lats = route.map((p) => p.lat), lngs = route.map((p) => p.lng)
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats), minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
-  const w = 320
-  const x = (lng: number) => 10 + ((lng - minLng) / Math.max(maxLng - minLng, 0.0001)) * (w - 20)
-  const y = (lat: number) => h - 10 - ((lat - minLat) / Math.max(maxLat - minLat, 0.0001)) * (h - 20)
-  const d = route.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.lng).toFixed(1)},${y(p.lat).toFixed(1)}`).join(' ')
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="mt-2 w-full rounded-xl bg-sage-100">
-      <path d={d} fill="none" stroke="#7E57A8" strokeWidth="3" strokeLinecap="round" />
-      <circle cx={x(route[0].lng)} cy={y(route[0].lat)} r="5" fill="#22c55e" />
-      <circle cx={x(route[route.length - 1].lng)} cy={y(route[route.length - 1].lat)} r="5" fill="#D14D72" />
-    </svg>
-  )
-}
 
 export interface TrainActivity { gps: GpsProgress | null; music: MusicStatus | null }
 
-export default function Train({ profile, workouts, onRefresh, onActivity, onShowMusic, guideRoute, onGuideDone }: { profile: Profile; workouts: Workout[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void; guideRoute?: RecommendedRoute | null; onGuideDone?: () => void }) {
+export default function Train({ profile, workouts, posts, onRefresh, onActivity, onShowMusic, guideRoute, onGuideDone }: { profile: Profile; workouts: Workout[]; posts: Post[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void; guideRoute?: RecommendedRoute | null; onGuideDone?: () => void }) {
   // Si hay una grabación GPS guardada sin terminar, abrir el GPS directo
   // para que Luis la vea y pueda reanudarla, en vez de esconderla detrás
   // del botón "Grabar con GPS".
@@ -58,7 +45,11 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
   const [notes, setNotes] = useState('')
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
-  const [openRoute, setOpenRoute] = useState<string | null>(null)
+  // Detalle abierto del historial (id del entrenamiento) y tarjeta de
+  // publicar (el entrenamiento recién guardado con GPS o uno del
+  // historial que aún no se publicó).
+  const [openDetail, setOpenDetail] = useState<string | null>(null)
+  const [toPublish, setToPublish] = useState<Workout | null>(null)
 
   const totalKm = workouts.reduce((s, w) => s + (w.distance_km || 0), 0)
   const totalMin = workouts.reduce((s, w) => s + w.duration_min, 0)
@@ -95,12 +86,33 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
           guide={guideRoute}
           onClearGuide={() => onGuideDone?.()}
           onSave={async (r) => {
-            await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, steps: r.steps, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
+            const saved = await logWorkout({ profile_id: profile.id, sport: r.sport, date: todayISO(), duration_min: r.durationMin, distance_km: r.distanceKm, steps: r.steps, notes: `Ruta GPS · ${r.route.length} puntos`, route: r.route })
             setShowGps(false)
-            setMsg('Entrenamiento con GPS guardado.')
+            setToPublish(saved)
             onGuideDone?.()
             onRefresh()
           }}
+        />
+      ) : toPublish ? (
+        <PublishWorkoutCard
+          workout={toPublish}
+          onPublish={async (note, visibility: PublishVisibility) => {
+            setErr('')
+            try {
+              if (visibility === 'comunidad') {
+                await createPost(profile.id, profile.name, buildRoutePostText(toPublish, note))
+                setMsg('Recorrido publicado en Comunidad.')
+              } else {
+                setMsg('Recorrido guardado solo para ti.')
+              }
+            } catch (e2) {
+              setErr(e2 instanceof Error ? e2.message : 'No se pudo publicar.')
+              return
+            }
+            setToPublish(null)
+            onRefresh()
+          }}
+          onClose={() => setToPublish(null)}
         />
       ) : (
         <Btn variant="coral" className="w-full" onClick={() => setShowGps(true)}>📍 Grabar con GPS</Btn>
@@ -137,26 +149,38 @@ export default function Train({ profile, workouts, onRefresh, onActivity, onShow
       <h3 className="text-lg font-bold">Tu historial</h3>
       {workouts.length === 0 ? <Empty text="Aún no hay entrenamientos. Graba tu primera caminata con GPS o regístrala manual." /> : (
         <div className="space-y-2">
-          {workouts.map((w) => (
-            <Card key={w.id}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-bold">{w.sport} · {formatDate(w.date)}</p>
-                  <p className="text-sm text-slate-600">{w.duration_min} min{w.distance_km ? ` · ${w.distance_km} km · ${paceMinKm(w.distance_km, w.duration_min)}` : ''}{w.steps ? ` · 👣 ${w.steps.toLocaleString('es-MX')} pasos` : ''}</p>
-                  {w.notes && <p className="text-sm text-slate-500">{w.notes}</p>}
-                </div>
-                <button className="text-sm text-red-500 underline" onClick={async () => { await deleteWorkout(w.id); onRefresh() }}>Borrar</button>
-              </div>
-              {w.route && w.route.length >= 2 && (
-                <>
-                  <button className="mt-1 text-sm font-semibold text-teal-dark underline" onClick={() => setOpenRoute(openRoute === w.id ? null : w.id)}>
-                    {openRoute === w.id ? 'Ocultar ruta' : 'Ver ruta'}
+          {workouts.map((w) => {
+            const published = findRoutePost(posts, w.id)
+            const publishedNote = published ? parseRoutePost(published.text)?.note : undefined
+            // La nota automática del GPS («Ruta GPS · N puntos») no se
+            // muestra: no dice nada y el mapa ya está en el detalle.
+            const userNotes = w.notes && !w.notes.startsWith('Ruta GPS · ') ? w.notes : undefined
+            return (
+              <Card key={w.id}>
+                <div className="flex items-start justify-between gap-2">
+                  <button type="button" className="flex-1 text-left" onClick={() => setOpenDetail(openDetail === w.id ? null : w.id)} title="Ver detalle">
+                    <p className="font-bold">{w.sport} · {formatDate(w.date)}</p>
+                    <p className="text-sm text-slate-600">{w.duration_min} min{w.distance_km ? ` · ${w.distance_km} km · ${paceMinKm(w.distance_km, w.duration_min)}` : ''}{w.steps ? ` · 👣 ${w.steps.toLocaleString('es-MX')} pasos` : ''}</p>
+                    <p className="text-xs font-semibold text-teal-dark">{openDetail === w.id ? 'Ocultar detalle' : 'Ver detalle'}</p>
                   </button>
-                  {openRoute === w.id && <RouteMini route={w.route} h={150} />}
-                </>
-              )}
-            </Card>
-          ))}
+                  <button className="shrink-0 text-sm text-red-500 underline" onClick={async () => { await deleteWorkout(w.id); onRefresh() }}>Borrar</button>
+                </div>
+                {openDetail === w.id && (
+                  <div className="mt-2 space-y-2">
+                    <WorkoutPostCard sport={w.sport} distanceKm={w.distance_km} durationMin={w.duration_min} steps={w.steps} route={w.route} />
+                    {userNotes && <p className="text-sm text-slate-500">{userNotes}</p>}
+                    {published ? (
+                      <p className="rounded-xl bg-teal/10 p-2 text-sm font-semibold text-teal-dark">
+                        Publicado en Comunidad{publishedNote ? ` · «${publishedNote}»` : ''}
+                      </p>
+                    ) : (
+                      <Btn variant="teal" className="w-full" onClick={() => setToPublish(w)}>Publicar recorrido</Btn>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       )}
 

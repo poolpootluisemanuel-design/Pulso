@@ -10,6 +10,7 @@ import type { AuthUser, Business, Post, Profile, SessionItem, Workout } from '..
 import { ZONES } from '../lib/types'
 import { deletePost, deleteSession, mode, setUserBlocked, updateProfileAsAdmin } from '../lib/store'
 import { formatDate } from '../lib/utils'
+import { postDisplayText } from '../lib/routeShare'
 import { Btn, Card, Empty, Tag, inputCls, selectCls } from './ui'
 
 export default function AdminPanel({
@@ -209,7 +210,8 @@ export default function AdminPanel({
               <li key={p.id} className="flex flex-wrap items-start gap-2 rounded-xl bg-sage-50 p-2">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold">{p.author_name}</p>
-                  <p className="text-sm text-slate-600">{p.text}</p>
+                  {/* Un recorrido muestra su nota (o su resumen), nunca el marcador con la ruta codificada. */}
+                  <p className="text-sm text-slate-600">{postDisplayText(p.text)}</p>
                 </div>
                 {confirmId === p.id ? (
                   <span className="flex gap-1">
