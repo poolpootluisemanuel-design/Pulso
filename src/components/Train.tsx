@@ -18,7 +18,7 @@ import { Btn, Card, Empty, Field, inputCls, selectCls } from './ui'
 
 export interface TrainActivity { gps: GpsProgress | null; music: MusicStatus | null }
 
-export default function Train({ profile, workouts, posts, onRefresh, onActivity, onShowMusic, guideRoute, onGuideDone }: { profile: Profile; workouts: Workout[]; posts: Post[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; onShowMusic?: () => void; guideRoute?: RecommendedRoute | null; onGuideDone?: () => void }) {
+export default function Train({ profile, workouts, posts, onRefresh, onActivity, guideRoute, onGuideDone }: { profile: Profile; workouts: Workout[]; posts: Post[]; onRefresh: () => void; onActivity?: (a: TrainActivity) => void; guideRoute?: RecommendedRoute | null; onGuideDone?: () => void }) {
   // Si hay una grabación GPS guardada sin terminar, abrir el GPS directo
   // para que Luis la vea y pueda reanudarla, en vez de esconderla detrás
   // del botón "Grabar con GPS".
@@ -118,12 +118,6 @@ export default function Train({ profile, workouts, posts, onRefresh, onActivity,
         <Btn variant="coral" className="w-full" onClick={() => setShowGps(true)}>📍 Grabar con GPS</Btn>
       )}
 
-      {/* Música: el reproductor persistente vive abajo en esta pantalla
-          (montado en App); este botón baja hasta él. */}
-      <button onClick={onShowMusic} className="w-full rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-md shadow-night/5">
-        <p className="text-lg font-bold">🎵 Música para entrenar</p>
-        <p className="text-sm text-slate-500">YouTube o música local. Sigue sonando aunque cambies de pestaña. Toca para abrir el reproductor ▲</p>
-      </button>
       <CoachPlan profile={profile} workouts={workouts} onRefresh={onRefresh} />
 
       <Card>

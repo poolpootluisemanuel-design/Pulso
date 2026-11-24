@@ -7,7 +7,7 @@ import { isNative } from '../lib/native'
 import { getNativeCurrentPosition, startNativeWatch, stopNativeWatch } from '../lib/nativeGps'
 import { getTodaySteps, healthAvailable, openHealthConnectSettings, requestStepsAccess } from '../lib/healthConnect'
 import { getStepCount, requestStepPermission, startStepCounting, stepCounterSupported, stopStepCounting } from '../lib/stepCounter'
-import { Btn, Card } from './ui'
+import { Btn } from './ui'
 import LiveTrainingToggle from './LiveTrainingToggle'
 import type { Profile } from '../lib/types'
 // El mapa (MapLibre, ~1 MB) solo se descarga cuando se muestra uno,
@@ -670,13 +670,13 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     ...(points.length > 1 ? [{ key: 'ahora', lat: points[points.length - 1].lat, lng: points[points.length - 1].lng, emoji: '📍', color: '#E63946', popupHtml: '<b>Estás aquí</b>' }] : []),
   ] : []
   const routeMap = (
-    <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 260 }}>Cargando mapa…</div>}>
+    <Suspense fallback={<div className="rounded-2xl bg-night p-4 text-center text-sm text-white/70" style={{ height: 320 }}>Cargando mapa…</div>}>
       <MapView
         center={points.length > 0 ? points[points.length - 1] : guide ? guide.points[0] : undefined}
         points={points}
         guidePoints={guide?.points}
         markers={routeMarkers}
-        height={260}
+        height={320}
         follow
         focus={nav?.nearestPoint}
         focusKey={focusKey}
@@ -686,32 +686,43 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
     </Suspense>
   )
 
+  // Mapa protagonista arriba + hoja inferior con los controles (ver
+  // docs/fix-entrenar-limpio.md): el mapa se ve siempre, también en
+  // reposo, y la hoja lleva el título, el deporte, los números y los
+  // botones. La hoja es fija (el tirador es solo visual); la página
+  // hace scroll como hoy.
   return (
-    <Card>
-      <h3 className="text-lg font-bold">Grabar con GPS</h3>
-      <p className="mb-3 text-sm text-slate-500">Caminata, correr o ciclismo. Se guarda tu ruta, distancia y ritmo.</p>
-      {profile && (
-        <LiveTrainingToggle
-          profileId={profile.id}
-          profileName={profile.name}
-          sport={sport}
-          isRecording={status === 'recording'}
-          position={currentPos}
-        />
-      )}
-      {guide && (
-        <p className="mb-3 flex items-center justify-between gap-2 rounded-xl bg-teal/10 p-2 text-sm font-semibold text-teal-dark">
-          <span>🗺️ Siguiendo ruta: {guide.name} — sigue la línea teal punteada.</span>
-          {onClearGuide && <button className="shrink-0 text-xs underline" onClick={onClearGuide}>Quitar guía</button>}
-        </p>
-      )}
+    <div>
+      {routeMap}
+      <div className="relative z-10 -mt-4 space-y-3 rounded-t-3xl bg-white px-4 pb-4 pt-2 shadow-lg shadow-night/10">
+        <div className="mx-auto h-1.5 w-11 rounded-full bg-slate-200" />
+        {status === 'idle' && (
+          <>
+            <h3 className="text-lg font-bold">Grabar con GPS</h3>
+            <p className="text-sm text-slate-500">Caminata, correr o ciclismo. Se guarda tu ruta, distancia y ritmo.</p>
+          </>
+        )}
+        {profile && (
+          <LiveTrainingToggle
+            profileId={profile.id}
+            profileName={profile.name}
+            sport={sport}
+            isRecording={status === 'recording'}
+            position={currentPos}
+          />
+        )}
+        {guide && (
+          <p className="flex items-center justify-between gap-2 rounded-xl bg-teal/10 p-2 text-sm font-semibold text-teal-dark">
+            <span>🗺️ Siguiendo ruta: {guide.name} — sigue la línea teal punteada.</span>
+            {onClearGuide && <button className="shrink-0 text-xs underline" onClick={onClearGuide}>Quitar guía</button>}
+          </p>
+        )}
 
-      {status === 'idle' && (
-        <div className="space-y-3">
-          {guide && (
-            <div>
-              {routeMap}
-              <p className="mt-1 text-center text-xs text-slate-500">La línea teal es la ruta recomendada ({routeDistanceKm(guide).toFixed(1)} km aprox.). Tu recorrido se dibuja en rojo encima. Al iniciar te diré cuándo girar y cuánto falta.</p>
+        {status === 'idle' && (
+          <div className="space-y-3">
+            {guide && (
+              <div>
+                <p className="mt-1 text-center text-xs text-slate-500">La línea teal es la ruta recomendada ({routeDistanceKm(guide).toFixed(1)} km aprox.). Tu recorrido se dibuja en rojo encima. Al iniciar te diré cuándo girar y cuánto falta.</p>
               <label className="mt-2 flex items-center justify-center gap-2 text-sm font-semibold text-slate-700">
                 <input type="checkbox" checked={voiceOn} onChange={(e) => {
                   const v = e.target.checked
@@ -839,7 +850,6 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
               ))}
             </div>
           </div>
-          {routeMap}
           <p className="text-center text-sm font-semibold text-coral">{status === 'paused' ? '⏸ Pausado' : isNative() ? '● Grabando… puedes apagar la pantalla, el GPS sigue' : '● Grabando… no cierres la app'}</p>
           {autoPaused && status === 'recording' && (
             <p className="rounded-xl bg-amber-50 p-2 text-center text-sm text-amber-800">⏸ Parece que estás parado — GPS en pausa automática. La distancia no se suma hasta que te muevas de verdad. El tiempo sigue corriendo.</p>
@@ -868,7 +878,6 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
         <div className="space-y-3">
           <h4 className="font-bold">Resumen de tu {sport.toLowerCase()}</h4>
           <p className="text-sm text-slate-600">Tiempo: {mm}:{ss} · Distancia: {distanceKm.toFixed(2)} km · Ritmo: {paceMinKm(distanceKm, minutes)}{steps > 0 ? ` · Pasos: ${steps.toLocaleString('es-MX')}` : ''}</p>
-          {routeMap}
           <Btn variant="coral" className="w-full" onClick={() => onSave({ sport, durationMin: Math.max(1, Math.round(minutes)), distanceKm: Math.round(distanceKm * 100) / 100, route: points, steps: steps > 0 ? steps : undefined })}>
             Guardar entrenamiento
           </Btn>
@@ -877,6 +886,7 @@ export default function GpsTracker({ profile, onSave, onCancel, onProgress, guid
           </button>
         </div>
       )}
-    </Card>
+      </div>
+    </div>
   )
 }

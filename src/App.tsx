@@ -487,7 +487,7 @@ export default function App() {
           ) : null
         ) : (
           <div className={`pulso-tab-in ${tab === 'entrenar' ? '' : 'hidden'}`}>
-            <Train profile={profile} workouts={workouts} posts={posts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} onShowMusic={() => setMusicExpanded(true)} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
+            <Train profile={profile} workouts={workouts} posts={posts} onRefresh={loadAll} onActivity={(a) => setActivity((prev) => ({ ...prev, gps: a.gps }))} guideRoute={guideRoute} onGuideDone={() => setGuideRoute(null)} />
           </div>
         )}
         {tab === 'perfil' && (
